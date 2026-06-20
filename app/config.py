@@ -12,6 +12,9 @@ class Config:
     user: str = os.getenv("COPY_FACTORY_USER", "admin")
     password: str = os.getenv("COPY_FACTORY_PASSWORD", "password")
     session_secret: str = os.getenv("COPY_FACTORY_SESSION_SECRET", "dev-secret-change-me")
+    export_base_url: str = os.getenv("NEWS_HARNESS_EXPORT_BASE_URL", "https://newshardness.hellopepper.work")
+    export_token: str = os.getenv("NEWS_HARNESS_EXPORT_TOKEN", "")
+    export_token_file: str = os.getenv("NEWS_HARNESS_EXPORT_TOKEN_FILE", "")
     sources: tuple[str, ...] = tuple(
         s.strip() for s in os.getenv("COPY_FACTORY_SOURCES", "mock-xueqiu,mock-reddit").split(",") if s.strip()
     )
@@ -31,3 +34,10 @@ class Config:
             if bad:
                 raise RuntimeError(f"production requires secure env vars: {', '.join(bad)}")
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+
+    def news_harness_token(self) -> str:
+        if self.export_token:
+            return self.export_token
+        if self.export_token_file:
+            return Path(self.export_token_file).read_text(encoding="utf-8").strip()
+        return ""

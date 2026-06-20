@@ -9,6 +9,7 @@ from http.server import ThreadingHTTPServer
 from urllib.parse import urlencode
 
 from app import db
+from app import adapters
 from app.config import Config
 from app.sync import run_sync
 from app.web import Handler
@@ -79,6 +80,45 @@ class CopyFactoryFlowTest(unittest.TestCase):
                 os.environ["DEEPSEEK_API_KEY"] = old_key
             if old_key_file is not None:
                 os.environ["DEEPSEEK_API_KEY_FILE"] = old_key_file
+
+    def test_real_export_uses_health_generated_at_gate(self) -> None:
+        calls = {"export": 0}
+        old_health = adapters.fetch_health
+        old_export = adapters.fetch_export
+
+        def fake_health(config):
+            return {"generated_at": "2026-06-20T13:27:07Z"}
+
+        def fake_export(config, sources, limit=500):
+            calls["export"] += 1
+            self.assertEqual(sources, ["xueqiu", "reddit"])
+            return [
+                {
+                    "source": "xueqiu_hot",
+                    "source_id": "xq-real-1",
+                    "url": "https://xueqiu.example/real/1",
+                    "title": "真实快照标题",
+                    "text": "真实快照正文",
+                    "author": "",
+                    "published_at": "2026-06-20T13:00:00Z",
+                    "media_urls": ["https://xueqiu.example/img.png"],
+                }
+            ]
+
+        adapters.fetch_health = fake_health
+        adapters.fetch_export = fake_export
+        try:
+            config = Config(db_path=f"{self.tmp.name}/real.sqlite3", sources=("xueqiu", "reddit"))
+            first = run_sync(config)
+            second = run_sync(config)
+        finally:
+            adapters.fetch_health = old_health
+            adapters.fetch_export = old_export
+
+        self.assertEqual(first.inserted, 1)
+        self.assertFalse(first.skipped)
+        self.assertTrue(second.skipped)
+        self.assertEqual(calls["export"], 1)
 
 
 if __name__ == "__main__":

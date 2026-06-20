@@ -42,6 +42,16 @@ Cron example:
 */30 * * * * cd /app && /usr/local/bin/python3 scripts/sync_once.py >> /var/log/copy-factory-sync.log 2>&1
 ```
 
+For the hosted latest-snapshot API, use:
+
+```bash
+export COPY_FACTORY_SOURCES=xueqiu,reddit
+export NEWS_HARNESS_EXPORT_TOKEN_FILE=/run/secrets/news_harness_export_token
+python3 scripts/sync_once.py
+```
+
+The sync checks `/api/health` first. If `health.generated_at` matches the last processed snapshot, it skips export. If it changed, it pulls `/api/export/v1/items?source=xueqiu,reddit&limit=500` and SQLite dedupe keeps only new rows.
+
 ## Environment
 
 Required for production:
@@ -57,7 +67,7 @@ Local/test may omit DeepSeek credentials and will use deterministic fake writing
 
 ## Real Data Sources
 
-Adapters live in `app/adapters.py`. The contract returns:
+`xueqiu,reddit` can already read the hosted latest-snapshot API. Adapters live in `app/adapters.py`. The internal contract returns:
 
 - `source`
 - `source_id`
@@ -68,7 +78,7 @@ Adapters live in `app/adapters.py`. The contract returns:
 - `published_at`
 - `media_urls`
 
-Replace the `real_adapter()` branch for `xueqiu` and `reddit` after you provide endpoint and credential environment variables. Keep secrets in environment variables or secret files, never in code.
+Keep tokens in environment variables or secret files, never in code.
 
 ## Deployment
 
@@ -104,6 +114,5 @@ Platform scheduler:
 
 ## Still Needed For Real Sources
 
-- Xueqiu endpoint and credential/cookie method.
-- Reddit endpoint/client credentials or approved API route.
+- A production export token in `NEWS_HARNESS_EXPORT_TOKEN` or `NEWS_HARNESS_EXPORT_TOKEN_FILE`.
 - DeepSeek production key or key file.

@@ -12,7 +12,7 @@ if __name__ == "__main__":
     result = run_sync(Config())
     print(
         f"batch={result.batch} fetched={result.fetched} inserted={result.inserted} "
-        f"duplicates={result.duplicates} generated={result.generated} errors={len(result.errors)}"
+        f"duplicates={result.duplicates} generated={result.generated} skipped={result.skipped} errors={len(result.errors)}"
     )
     for error in result.errors:
         print(f"error: {error}")

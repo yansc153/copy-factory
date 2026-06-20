@@ -47,6 +47,10 @@ def init_db(conn: sqlite3.Connection) -> None:
             WHERE url IS NOT NULL AND url != '';
         CREATE UNIQUE INDEX IF NOT EXISTS idx_source_hash
             ON source_items(source, content_hash);
+        CREATE TABLE IF NOT EXISTS sync_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
         """
     )
     conn.commit()
@@ -136,3 +140,16 @@ def today_items(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 def get_item(conn: sqlite3.Connection, item_id: int) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM source_items WHERE id = ?", (item_id,)).fetchone()
+
+
+def get_state(conn: sqlite3.Connection, key: str) -> str:
+    row = conn.execute("SELECT value FROM sync_state WHERE key = ?", (key,)).fetchone()
+    return str(row["value"]) if row else ""
+
+
+def set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT INTO sync_state(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+    conn.commit()

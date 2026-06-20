@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import json
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+from app.config import Config
+
 
 class AdapterConfigError(RuntimeError):
     pass
@@ -45,10 +51,37 @@ def mock_reddit() -> list[dict[str, object]]:
     ]
 
 
-def real_adapter(name: str) -> list[dict[str, object]]:
-    raise AdapterConfigError(
-        f"{name} adapter needs endpoint/credential wiring. Set COPY_FACTORY_SOURCES to mock-xueqiu,mock-reddit until ready."
+def fetch_health(config: Config) -> dict[str, object]:
+    with urlopen(f"{config.export_base_url.rstrip('/')}/api/health", timeout=20) as response:
+        return json.load(response)
+
+
+def fetch_export(config: Config, sources: list[str], limit: int = 500) -> list[dict[str, object]]:
+    token = config.news_harness_token()
+    if not token:
+        raise AdapterConfigError("NEWS_HARNESS_EXPORT_TOKEN or NEWS_HARNESS_EXPORT_TOKEN_FILE is required")
+    query = urlencode({"source": ",".join(sources), "limit": str(limit)})
+    req = Request(
+        f"{config.export_base_url.rstrip('/')}/api/export/v1/items?{query}",
+        headers={"Authorization": f"Bearer {token}"},
     )
+    with urlopen(req, timeout=30) as response:
+        payload = json.load(response)
+    return [normalize_export_item(item) for item in payload.get("items", [])]
+
+
+def normalize_export_item(item: dict[str, object]) -> dict[str, object]:
+    text = str(item.get("copy_text", ""))
+    return {
+        "source": str(item.get("source", "")),
+        "source_id": str(item.get("id", "")),
+        "url": str(item.get("source_url", "")),
+        "title": text.splitlines()[0][:80] if text else str(item.get("id", "")),
+        "text": text,
+        "author": "",
+        "published_at": str(item.get("published_at", "")),
+        "media_urls": item.get("image_refs", []) or [],
+    }
 
 
 def fetch_source(name: str) -> list[dict[str, object]]:
@@ -57,5 +90,5 @@ def fetch_source(name: str) -> list[dict[str, object]]:
     if name == "mock-reddit":
         return mock_reddit()
     if name in {"xueqiu", "reddit"}:
-        return real_adapter(name)
+        raise AdapterConfigError("real xueqiu/reddit are fetched together through health-gated export")
     raise AdapterConfigError(f"unknown source adapter: {name}")
