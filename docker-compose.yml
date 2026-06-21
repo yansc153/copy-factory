@@ -24,13 +24,6 @@ services:
       COPY_FACTORY_SYNC_INTERVAL_SECONDS: ${COPY_FACTORY_SYNC_INTERVAL_SECONDS:-1800}
     volumes:
       - copy-factory-data:/app/data
-    networks:
-      - default
-      - traefik-proxy
 
 volumes:
   copy-factory-data:
-
-networks:
-  traefik-proxy:
-    external: true

@@ -144,7 +144,7 @@ Production URL:
 https://hardness-content.hellopepper.work
 ```
 
-The compose file is ready for Hostinger Docker Manager with the built-in Traefik project. It joins the external `traefik-proxy` network, routes `hardness-content.hellopepper.work`, and lets Traefik handle HTTPS certificates through Let's Encrypt. The container starts the authenticated website and a built-in 30-minute sync loop.
+The compose file is ready for Hostinger Docker Manager with the built-in Traefik project. It declares Docker labels for `hardness-content.hellopepper.work`, exposes the app only inside Docker, and lets Traefik handle HTTPS certificates through Let's Encrypt. The container starts the authenticated website and a built-in 30-minute sync loop.
 
 Docker:
 
