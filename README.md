@@ -28,7 +28,15 @@ Morning flow:
 2. Review generated drafts, edit today's copy, and save approved items.
 3. Drag approved items into time slots on Schedule. The browser stores UTC ISO timestamps and displays them in local time.
 4. Click "确认发布计划". The server marks due work as confirmed queue tasks.
-5. The future Mac mini publisher calls the publish API below, claims due tasks, posts externally, then writes back `published` or `failed`.
+5. Stop there for the local morning workflow. The future Mac mini publisher starts from the confirmed queue later.
+
+Local smoke for that exact workflow:
+
+```bash
+make morning-smoke
+```
+
+It starts a temporary local server and SQLite DB, runs sync/generation through the web API, approves one generated draft, schedules it, confirms the plan, and prints the confirmed queue evidence.
 
 ## Checks
 
@@ -37,6 +45,7 @@ make lint
 make typecheck
 make test
 make build
+make morning-smoke
 ```
 
 No package install is required. The app uses Python standard library only.

@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test build run sync
+.PHONY: install lint typecheck test build run sync morning-smoke
 
 PYTHON ?= python3
 
@@ -24,3 +24,6 @@ run:
 
 sync:
 	$(PYTHON) scripts/sync_once.py
+
+morning-smoke:
+	$(PYTHON) scripts/morning_smoke.py
