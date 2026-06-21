@@ -3,10 +3,13 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import urlencode
 
 from app import db
@@ -189,6 +192,15 @@ class CopyFactoryFlowTest(unittest.TestCase):
         self.assertIn("海外投资者讨论 AI 资本开支", copy)
         self.assertNotIn("Investors debate", copy)
         self.assertNotIn("A thread on large-cap tech", copy)
+
+    def test_deepseek_smoke_requires_real_key_without_traceback(self) -> None:
+        env = os.environ.copy()
+        env.pop("DEEPSEEK_API_KEY", None)
+        env.pop("DEEPSEEK_API_KEY_FILE", None)
+        result = subprocess.run([sys.executable, "scripts/deepseek_smoke.py"], cwd=Path(__file__).resolve().parents[1], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("DEEPSEEK_API_KEY", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
     def test_real_export_uses_health_generated_at_gate(self) -> None:
         calls = {"export": 0}
