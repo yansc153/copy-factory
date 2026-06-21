@@ -1,6 +1,6 @@
 # Copy Factory v1
 
-Single-user copy review system for mock Xueqiu/Reddit source sync, dedupe, Huajiao-style draft generation, and manual approval.
+Single-user copy review workbench for Xueqiu/Reddit snapshot sync, dedupe, Huajiao-style draft generation, manual approval, and drag-to-schedule planning.
 
 ## Local Run
 
@@ -15,7 +15,12 @@ make sync
 make run
 ```
 
-Open `http://127.0.0.1:8000` and log in with `admin / password`.
+Open `http://127.0.0.1:8000` and log in with `admin / password`. The app has four main work areas:
+
+- Review: Twitter-like feed for generated copy, source text, and media references.
+- Sync: preview latest snapshot count before running generation.
+- Schedule: drag approved copy into time slots without auto-posting.
+- Settings: runtime credential and deployment status.
 
 ## Checks
 
@@ -111,6 +116,20 @@ Platform scheduler:
 - Run the web process with `python3 -m app.web --host 0.0.0.0 --port 8000`.
 - Run `python3 scripts/sync_once.py` every 30 minutes.
 - Put DeepSeek and source credentials in platform secrets.
+- Put the site behind HTTPS and basic platform firewall rules; the app itself is single-user session login, not a team permission system.
+
+## Web/API Surface
+
+The browser app is served by `app.web` and talks to JSON endpoints:
+
+- `GET /api/items`
+- `GET /api/items/:id`
+- `GET /api/settings/status`
+- `POST /api/sync/preview`
+- `POST /api/sync/run`
+- `POST /api/items/:id/review`
+- `POST /api/items/:id/schedule`
+- `POST /api/items/:id/unschedule`
 
 ## What Works Now
 
@@ -120,6 +139,8 @@ Platform scheduler:
 - Raw text, source, URL, media references, sync batch, generation status, and errors.
 - Huajiao writer bridge with fake local writer or DeepSeek script.
 - Review pool with edit and `draft` / `approved` / `rejected` save.
+- Sync preview/run console with recent batch history.
+- Drag schedule timeline for approved copy. It only saves schedule metadata; it does not publish to X/Twitter.
 
 ## Still Needed For Real Sources
 

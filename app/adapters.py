@@ -21,7 +21,7 @@ def mock_xueqiu() -> list[dict[str, object]]:
             "text": "央行公开市场延续净投放，隔夜资金价格回落。交易员称，跨季预期仍在，但短端压力比上周缓和。",
             "author": "雪球宏观观察",
             "published_at": "2026-06-20T09:00:00+08:00",
-            "media_urls": ["https://xueqiu.example/chart/liquidity.png"],
+            "media_urls": ["/static/mock-liquidity.svg"],
         },
         {
             "source": "mock-xueqiu",
@@ -46,7 +46,7 @@ def mock_reddit() -> list[dict[str, object]]:
             "text": "A thread on large-cap tech asks whether AI infrastructure spending can keep rising without pressuring free cash flow.",
             "author": "r/investing",
             "published_at": "2026-06-20T02:00:00Z",
-            "media_urls": ["https://reddit.example/media/capex-table.jpg"],
+            "media_urls": ["/static/mock-capex.svg"],
         }
     ]
 

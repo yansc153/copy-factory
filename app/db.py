@@ -36,6 +36,8 @@ def init_db(conn: sqlite3.Connection) -> None:
             generated_copy TEXT NOT NULL DEFAULT '',
             review_status TEXT NOT NULL DEFAULT 'draft',
             edited_copy TEXT NOT NULL DEFAULT '',
+            schedule_status TEXT NOT NULL DEFAULT 'unscheduled',
+            scheduled_at TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -51,9 +53,31 @@ def init_db(conn: sqlite3.Connection) -> None:
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS sync_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            batch TEXT NOT NULL,
+            fetched INTEGER NOT NULL,
+            inserted INTEGER NOT NULL,
+            duplicates INTEGER NOT NULL,
+            filtered INTEGER NOT NULL,
+            generated INTEGER NOT NULL,
+            skipped INTEGER NOT NULL,
+            errors TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
         """
     )
+    ensure_columns(conn)
     conn.commit()
+
+
+def ensure_columns(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(source_items)")}
+    if "schedule_status" not in columns:
+        conn.execute("ALTER TABLE source_items ADD COLUMN schedule_status TEXT NOT NULL DEFAULT 'unscheduled'")
+    if "scheduled_at" not in columns:
+        conn.execute("ALTER TABLE source_items ADD COLUMN scheduled_at TEXT NOT NULL DEFAULT ''")
 
 
 def now() -> str:
@@ -134,12 +158,46 @@ def save_review(conn: sqlite3.Connection, item_id: int, edited_copy: str, status
     conn.commit()
 
 
+def save_schedule(conn: sqlite3.Connection, item_id: int, scheduled_at: str) -> None:
+    conn.execute(
+        "UPDATE source_items SET schedule_status = 'scheduled', scheduled_at = ?, updated_at = ? WHERE id = ?",
+        (scheduled_at, now(), item_id),
+    )
+    conn.commit()
+
+
+def clear_schedule(conn: sqlite3.Connection, item_id: int) -> None:
+    conn.execute(
+        "UPDATE source_items SET schedule_status = 'unscheduled', scheduled_at = '', updated_at = ? WHERE id = ?",
+        (now(), item_id),
+    )
+    conn.commit()
+
+
 def today_items(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return list(conn.execute("SELECT * FROM source_items ORDER BY updated_at DESC, id DESC"))
 
 
 def get_item(conn: sqlite3.Connection, item_id: int) -> sqlite3.Row | None:
     return conn.execute("SELECT * FROM source_items WHERE id = ?", (item_id,)).fetchone()
+
+
+def existing_item_id(conn: sqlite3.Connection, item: dict[str, Any]) -> int | None:
+    content_hash = hash_text(f"{item.get('title', '')}\n{item.get('text', '')}")
+    row = conn.execute(
+        """
+        SELECT id FROM source_items
+        WHERE source = ?
+          AND (
+            (? != '' AND source_id = ?)
+            OR (? != '' AND url = ?)
+            OR content_hash = ?
+          )
+        LIMIT 1
+        """,
+        (item["source"], item.get("source_id", ""), item.get("source_id", ""), item.get("url", ""), item.get("url", ""), content_hash),
+    ).fetchone()
+    return int(row["id"]) if row else None
 
 
 def get_state(conn: sqlite3.Connection, key: str) -> str:
@@ -153,3 +211,29 @@ def set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
         (key, value),
     )
     conn.commit()
+
+
+def record_sync_run(conn: sqlite3.Connection, kind: str, result: Any) -> None:
+    conn.execute(
+        """
+        INSERT INTO sync_runs(kind, batch, fetched, inserted, duplicates, filtered, generated, skipped, errors, created_at)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            kind,
+            result.batch,
+            result.fetched,
+            result.inserted,
+            result.duplicates,
+            result.filtered,
+            result.generated,
+            1 if result.skipped else 0,
+            json.dumps(result.errors, ensure_ascii=False),
+            now(),
+        ),
+    )
+    conn.commit()
+
+
+def recent_sync_runs(conn: sqlite3.Connection, limit: int = 8) -> list[sqlite3.Row]:
+    return list(conn.execute("SELECT * FROM sync_runs ORDER BY id DESC LIMIT ?", (limit,)))

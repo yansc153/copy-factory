@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import http.client
+import json
 import os
 import tempfile
 import threading
@@ -45,24 +46,36 @@ class CopyFactoryFlowTest(unittest.TestCase):
             conn.request("GET", "/review", headers={"Cookie": cookie})
             review = conn.getresponse()
             review_html = review.read().decode()
-            self.assertIn("今日待审核池", review_html)
-            self.assertIn("央行继续净投放", review_html)
+            self.assertIn("app.js", review_html)
+
+            conn.request("GET", "/api/items", headers={"Cookie": cookie})
+            items_response = conn.getresponse()
+            items_payload = json.loads(items_response.read().decode())
+            self.assertEqual(items_response.status, 200)
+            self.assertTrue(any("央行继续净投放" in item["title"] for item in items_payload["items"]))
 
             db_conn = db.connect(self.config.db_path)
             item_id = db_conn.execute("SELECT id FROM source_items ORDER BY id LIMIT 1").fetchone()["id"]
             db_conn.close()
 
             edited = "人工编辑后的花椒文案"
-            save_body = urlencode({"edited_copy": edited, "status": "approved"})
-            conn.request("POST", f"/items/{item_id}/save", save_body, {"Content-Type": "application/x-www-form-urlencoded", "Cookie": cookie})
+            save_body = json.dumps({"edited_copy": edited, "status": "approved"}, ensure_ascii=False).encode()
+            conn.request("POST", f"/api/items/{item_id}/review", save_body, {"Content-Type": "application/json", "Cookie": cookie})
             saved = conn.getresponse()
-            self.assertEqual(saved.status, 303)
+            self.assertEqual(saved.status, 200)
+
+            schedule_body = json.dumps({"scheduled_at": "2026-06-21T09:00"}, ensure_ascii=False)
+            conn.request("POST", f"/api/items/{item_id}/schedule", schedule_body, {"Content-Type": "application/json", "Cookie": cookie})
+            scheduled = conn.getresponse()
+            self.assertEqual(scheduled.status, 200)
 
             db_conn = db.connect(self.config.db_path)
             row = db.get_item(db_conn, item_id)
             db_conn.close()
             self.assertEqual(row["edited_copy"], edited)
             self.assertEqual(row["review_status"], "approved")
+            self.assertEqual(row["schedule_status"], "scheduled")
+            self.assertEqual(row["scheduled_at"], "2026-06-21T09:00")
         finally:
             server.shutdown()
             server.server_close()
@@ -118,6 +131,34 @@ class CopyFactoryFlowTest(unittest.TestCase):
         self.assertEqual(first.inserted, 1)
         self.assertFalse(first.skipped)
         self.assertTrue(second.skipped)
+        self.assertEqual(calls["export"], 1)
+
+    def test_preview_does_not_pull_export_when_health_is_unchanged(self) -> None:
+        calls = {"export": 0}
+        old_health = adapters.fetch_health
+        old_export = adapters.fetch_export
+
+        def fake_health(config):
+            return {"generated_at": "2026-06-20T13:27:07Z"}
+
+        def fake_export(config, sources, limit=500):
+            calls["export"] += 1
+            return []
+
+        adapters.fetch_health = fake_health
+        adapters.fetch_export = fake_export
+        try:
+            from app.sync import preview_sync
+
+            config = Config(db_path=f"{self.tmp.name}/preview.sqlite3", sources=("xueqiu", "reddit"))
+            first = run_sync(config)
+            preview = preview_sync(config)
+        finally:
+            adapters.fetch_health = old_health
+            adapters.fetch_export = old_export
+
+        self.assertEqual(first.inserted, 0)
+        self.assertTrue(preview.skipped)
         self.assertEqual(calls["export"], 1)
 
     def test_real_export_filters_by_import_window_before_generation(self) -> None:

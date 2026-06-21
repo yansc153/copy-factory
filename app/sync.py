@@ -57,9 +57,46 @@ def run_sync(config: Config) -> SyncResult:
                 result.errors.append(f"{source}: {exc}")
                 continue
             process_items(conn, config, batch, result, items)
+        db.record_sync_run(conn, "run", result)
     finally:
         conn.close()
     return result
+
+
+def preview_sync(config: Config) -> SyncResult:
+    config.validate_for_web()
+    batch = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    result = SyncResult(batch=batch)
+    conn = db.connect(config.db_path)
+    db.init_db(conn)
+    try:
+        real_sources = [s for s in config.sources if s in {"xueqiu", "reddit"}]
+        if not real_sources:
+            return result
+        health = adapters.fetch_health(config)
+        generated_at = str(health.get("generated_at", ""))
+        state_key = "news_harness_generated_at:" + ",".join(sorted(real_sources))
+        if generated_at and generated_at == db.get_state(conn, state_key):
+            result.skipped = True
+            db.record_sync_run(conn, "preview", result)
+            return result
+        items = adapters.fetch_export(config, real_sources, limit=config.export_limit)
+        result.fetched = len(items)
+        items = filter_by_window(items, config)
+        result.filtered = result.fetched - len(items)
+        for item in items:
+            if db.existing_item_id(conn, item):
+                result.duplicates += 1
+            else:
+                result.inserted += 1
+        db.record_sync_run(conn, "preview", result)
+        return result
+    except Exception as exc:
+        result.errors.append(f"preview: {exc}")
+        db.record_sync_run(conn, "preview", result)
+        return result
+    finally:
+        conn.close()
 
 
 def parse_time(value: str) -> datetime | None:
