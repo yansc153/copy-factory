@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
 from app import adapters, db, writer
 from app.config import Config
@@ -13,6 +14,7 @@ class SyncResult:
     fetched: int = 0
     inserted: int = 0
     duplicates: int = 0
+    filtered: int = 0
     generated: int = 0
     skipped: bool = False
     errors: list[str] = field(default_factory=list)
@@ -37,8 +39,10 @@ def run_sync(config: Config) -> SyncResult:
                 if generated_at and generated_at == db.get_state(conn, state_key):
                     result.skipped = True
                 else:
-                    items = adapters.fetch_export(config, real_sources)
+                    items = adapters.fetch_export(config, real_sources, limit=config.export_limit)
                     result.fetched += len(items)
+                    items = filter_by_window(items, config)
+                    result.filtered += result.fetched - len(items)
                     process_items(conn, config, batch, result, items)
                     if generated_at:
                         db.set_state(conn, state_key, generated_at)
@@ -56,6 +60,39 @@ def run_sync(config: Config) -> SyncResult:
     finally:
         conn.close()
     return result
+
+
+def parse_time(value: str) -> datetime | None:
+    if not value:
+        return None
+    value = value.strip()
+    if len(value) == 10:
+        value += "T00:00:00+00:00"
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def filter_by_window(items: list[dict[str, Any]], config: Config) -> list[dict[str, Any]]:
+    since = parse_time(config.import_since)
+    until = parse_time(config.import_until)
+    if not since and not until:
+        return items
+    kept = []
+    for item in items:
+        published = parse_time(str(item.get("published_at", "")))
+        if not published:
+            continue
+        if since and published < since:
+            continue
+        if until and published >= until:
+            continue
+        kept.append(item)
+    return kept
 
 
 def process_items(conn, config: Config, batch: str, result: SyncResult, items: list[dict[str, object]]) -> None:

@@ -120,6 +120,57 @@ class CopyFactoryFlowTest(unittest.TestCase):
         self.assertTrue(second.skipped)
         self.assertEqual(calls["export"], 1)
 
+    def test_real_export_filters_by_import_window_before_generation(self) -> None:
+        old_health = adapters.fetch_health
+        old_export = adapters.fetch_export
+
+        def fake_health(config):
+            return {"generated_at": "2026-06-20T13:27:07Z"}
+
+        def fake_export(config, sources, limit=500):
+            self.assertEqual(limit, 2)
+            return [
+                {
+                    "source": "reddit",
+                    "source_id": "old",
+                    "url": "https://reddit.example/old",
+                    "title": "old",
+                    "text": "old",
+                    "author": "",
+                    "published_at": "2026-06-19T23:59:59Z",
+                    "media_urls": [],
+                },
+                {
+                    "source": "reddit",
+                    "source_id": "kept",
+                    "url": "https://reddit.example/kept",
+                    "title": "kept",
+                    "text": "kept",
+                    "author": "",
+                    "published_at": "2026-06-20T08:00:00Z",
+                    "media_urls": [],
+                },
+            ]
+
+        adapters.fetch_health = fake_health
+        adapters.fetch_export = fake_export
+        try:
+            config = Config(
+                db_path=f"{self.tmp.name}/window.sqlite3",
+                sources=("reddit",),
+                export_limit=2,
+                import_since="2026-06-20",
+                import_until="2026-06-21",
+            )
+            result = run_sync(config)
+        finally:
+            adapters.fetch_health = old_health
+            adapters.fetch_export = old_export
+
+        self.assertEqual(result.fetched, 2)
+        self.assertEqual(result.filtered, 1)
+        self.assertEqual(result.inserted, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

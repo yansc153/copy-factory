@@ -16,6 +16,12 @@ def has_deepseek_key() -> bool:
     return bool(os.getenv("DEEPSEEK_API_KEY") or (key_file and Path(key_file).exists()))
 
 
+def validate_deepseek_key() -> None:
+    key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    if key and not key.startswith("sk-"):
+        raise RuntimeError("DEEPSEEK_API_KEY looks invalid; expected it to start with sk-")
+
+
 def fake_writer(item: dict[str, object]) -> str:
     title = str(item.get("title", ""))
     text = str(item.get("text", ""))
@@ -25,6 +31,7 @@ def fake_writer(item: dict[str, object]) -> str:
 
 
 def deepseek_writer(item: dict[str, object]) -> str:
+    validate_deepseek_key()
     source_text = f"# {item.get('title', '')}\n\n来源：{item.get('source', '')}\n作者：{item.get('author', '')}\n链接：{item.get('url', '')}\n\n{item.get('text', '')}\n"
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "source.md"
@@ -32,7 +39,9 @@ def deepseek_writer(item: dict[str, object]) -> str:
         src.write_text(source_text, encoding="utf-8")
         env = os.environ.copy()
         env["VOICE_OUTPUT_MODE"] = "long-social"
-        subprocess.run(["python3", HUAJIAO_SCRIPT, str(src), str(out)], check=True, env=env, capture_output=True, text=True)
+        result = subprocess.run(["python3", HUAJIAO_SCRIPT, str(src), str(out)], env=env, capture_output=True, text=True)
+        if result.returncode:
+            raise RuntimeError((result.stderr or result.stdout or "DeepSeek writer failed")[-800:])
         return out.read_text(encoding="utf-8")
 
 

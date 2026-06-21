@@ -47,10 +47,19 @@ For the hosted latest-snapshot API, use:
 ```bash
 export COPY_FACTORY_SOURCES=xueqiu,reddit
 export NEWS_HARNESS_EXPORT_TOKEN_FILE=/run/secrets/news_harness_export_token
+export NEWS_HARNESS_EXPORT_LIMIT=500
 python3 scripts/sync_once.py
 ```
 
 The sync checks `/api/health` first. If `health.generated_at` matches the last processed snapshot, it skips export. If it changed, it pulls `/api/export/v1/items?source=xueqiu,reddit&limit=500` and SQLite dedupe keeps only new rows.
+
+To run a 7am "yesterday only" batch, set a half-open date window:
+
+```bash
+export COPY_FACTORY_IMPORT_SINCE=2026-06-20
+export COPY_FACTORY_IMPORT_UNTIL=2026-06-21
+python3 scripts/sync_once.py
+```
 
 ## Environment
 

@@ -15,6 +15,9 @@ class Config:
     export_base_url: str = os.getenv("NEWS_HARNESS_EXPORT_BASE_URL", "https://newshardness.hellopepper.work")
     export_token: str = os.getenv("NEWS_HARNESS_EXPORT_TOKEN", "")
     export_token_file: str = os.getenv("NEWS_HARNESS_EXPORT_TOKEN_FILE", "")
+    export_limit: int = int(os.getenv("NEWS_HARNESS_EXPORT_LIMIT", "500"))
+    import_since: str = os.getenv("COPY_FACTORY_IMPORT_SINCE", "")
+    import_until: str = os.getenv("COPY_FACTORY_IMPORT_UNTIL", "")
     sources: tuple[str, ...] = tuple(
         s.strip() for s in os.getenv("COPY_FACTORY_SOURCES", "mock-xueqiu,mock-reddit").split(",") if s.strip()
     )
