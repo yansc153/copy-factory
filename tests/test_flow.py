@@ -69,8 +69,12 @@ class CopyFactoryFlowTest(unittest.TestCase):
             db_conn.close()
 
             edited = "人工编辑后的花椒文案"
+            selected_media = "/static/mock-liquidity.svg"
             for offset, item_id in enumerate(item_ids):
-                save_body = json.dumps({"edited_copy": f"{edited} {offset}", "status": "approved"}, ensure_ascii=False).encode()
+                save_payload = {"edited_copy": f"{edited} {offset}", "status": "approved"}
+                if offset == 0:
+                    save_payload["selected_media_url"] = selected_media
+                save_body = json.dumps(save_payload, ensure_ascii=False).encode()
                 conn.request("POST", f"/api/items/{item_id}/review", save_body, {"Content-Type": "application/json", "Cookie": cookie})
                 saved = conn.getresponse()
                 self.assertEqual(saved.status, 200)
@@ -94,6 +98,7 @@ class CopyFactoryFlowTest(unittest.TestCase):
             queue_payload = json.loads(queue.read().decode())
             self.assertEqual(queue.status, 200)
             self.assertEqual([task["status"] for task in queue_payload["tasks"]], ["confirmed", "confirmed", "confirmed"])
+            self.assertEqual(queue_payload["tasks"][0]["selected_media_url"], selected_media)
 
             worker_headers = {"Content-Type": "application/json", "Authorization": "Bearer worker-secret"}
             claim_body = json.dumps({"now": "9999-12-31T23:59:59Z", "limit": 1}).encode()

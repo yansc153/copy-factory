@@ -217,7 +217,13 @@ class Handler(BaseHTTPRequestHandler):
         conn = db.connect(self.config.db_path)
         db.init_db(conn)
         try:
-            if not db.save_review(conn, item_id, str(payload.get("edited_copy", "")), str(payload.get("status", "draft"))):
+            if not db.save_review(
+                conn,
+                item_id,
+                str(payload.get("edited_copy", "")),
+                str(payload.get("status", "draft")),
+                str(payload["selected_media_url"]) if "selected_media_url" in payload else None,
+            ):
                 self.send_json({"error": "item is locked for publishing"}, 409)
                 return
             self.send_json({"item": row_to_item(db.get_item(conn, item_id))})
@@ -293,6 +299,7 @@ def row_to_item(row) -> dict[str, object]:
         "author": row["author"],
         "published_at": row["published_at"],
         "media_urls": json.loads(row["media_urls"]),
+        "selected_media_url": row["selected_media_url"],
         "generation_status": row["generation_status"],
         "generation_error": row["generation_error"],
         "generated_copy": row["generated_copy"],
@@ -322,6 +329,7 @@ def row_to_publish_task(row, claim_token: str = "") -> dict[str, object]:
         "source_url": item["url"],
         "title": item["title"],
         "media_urls": item["media_urls"],
+        "selected_media_url": item["selected_media_url"],
         "confirmed_at": item["publish_confirmed_at"],
         "claimed_at": item["publish_claimed_at"],
         "result_at": item["publish_result_at"],

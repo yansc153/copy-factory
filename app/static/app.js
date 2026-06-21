@@ -22,6 +22,10 @@ function mediaUrl(ref) {
   return ref.thumbnail_ref || ref.original_image_ref || "";
 }
 
+function selectedMedia(item) {
+  return item.selected_media_url || mediaUrl(item.media_urls?.[0]);
+}
+
 function counts() {
   return {
     all: state.items.length,
@@ -89,6 +93,7 @@ function itemCard(item, compact = false, context = "") {
         ${item.schedule_status === "scheduled" ? `<span class="pill approved">${h(scheduled)}</span>` : ""}
         ${item.publish_status && item.publish_status !== "none" ? `<span class="pill publish">${h(item.publish_status)}</span>` : ""}
       </div>
+      ${selectedMedia(item) ? `<img class="selected-media ${compact ? "compact" : ""}" src="${h(selectedMedia(item))}" alt="选中配图">` : ""}
       <p class="copy">${h(copy)}</p>
       ${compact ? "" : mediaGrid(item)}
       ${compact && context === "pool" ? `<div class="actions"><button onclick="quickSchedule(${item.id})">排到下一槽</button></div>` : compact ? "" : `<div class="actions">
@@ -111,10 +116,15 @@ function reviewView() {
 function editorView() {
   const item = state.selected || state.items[0];
   if (!item) return reviewView();
+  const mediaChoices = item.media_urls.length ? `<div class="media-choice">${item.media_urls.map((ref, i) => {
+    const url = mediaUrl(ref);
+    const checked = selectedMedia(item) === url ? "checked" : "";
+    return `<label><input type="radio" name="selected-media" value="${h(url)}" ${checked}><img src="${h(url)}" alt="候选配图 ${i + 1}"><span>图片 ${i + 1}</span></label>`;
+  }).join("")}</div>` : `<p class="muted">这条来源没有图片。</p>`;
   return shell(`<div class="topbar"><button class="small-btn" onclick="go('review')">返回审核池</button></div>
     <div class="editor">
       <section class="source-pane"><h1>${h(item.title)}</h1><p class="muted">${h(item.source)} · ${h(item.published_at)} · <a href="${h(item.url)}" target="_blank">原文链接</a></p><h2>原文</h2><pre>${h(item.text)}</pre><h2>图片引用</h2>${mediaGrid(item)}</section>
-      <section class="edit-pane"><h2>生成文案</h2><textarea id="copy">${h(item.edited_copy || item.generated_copy)}</textarea><div class="form-grid"><button class="wide-btn" onclick="saveReview(${item.id}, 'draft')">保存草稿</button><button class="wide-btn" onclick="saveReview(${item.id}, 'approved')">批准</button><button class="small-btn danger" onclick="saveReview(${item.id}, 'rejected')">拒绝</button><button class="small-btn" onclick="go('schedule')">去排期</button></div><p class="muted">生成状态：${h(item.generation_status)} ${h(item.generation_error || "")}</p></section>
+      <section class="edit-pane"><h2>生成文案</h2><textarea id="copy">${h(item.edited_copy || item.generated_copy)}</textarea><h2>选择配图</h2>${mediaChoices}<div class="form-grid"><button class="wide-btn" onclick="saveReview(${item.id}, 'draft')">保存草稿</button><button class="wide-btn" onclick="saveReview(${item.id}, 'approved')">批准</button><button class="small-btn danger" onclick="saveReview(${item.id}, 'rejected')">拒绝</button><button class="small-btn" onclick="go('schedule')">去排期</button></div><p class="muted">生成状态：${h(item.generation_status)} ${h(item.generation_error || "")}</p></section>
     </div>`);
 }
 
@@ -195,12 +205,13 @@ async function go(view) { state.view = view; await refresh(); }
 function openItem(id) { state.selected = state.items.find((x) => x.id === id); state.view = "editor"; render(); }
 async function saveReview(id, status) {
   const text = $("#copy")?.value ?? state.items.find((x) => x.id === id)?.edited_copy ?? "";
-  await api(`/api/items/${id}/review`, { edited_copy: text, status });
+  const selected = document.querySelector("input[name='selected-media']:checked")?.value ?? state.items.find((x) => x.id === id)?.selected_media_url ?? "";
+  await api(`/api/items/${id}/review`, { edited_copy: text, status, selected_media_url: selected });
   await go("review");
 }
 async function quickReview(id, status) {
   const item = state.items.find((x) => x.id === id);
-  await api(`/api/items/${id}/review`, { edited_copy: item.edited_copy || item.generated_copy, status });
+  await api(`/api/items/${id}/review`, { edited_copy: item.edited_copy || item.generated_copy, status, selected_media_url: selectedMedia(item) });
   await refresh();
 }
 function syncPayload() { return { limit: Number($("#limit")?.value || 10), since: $("#since")?.value || "", until: $("#until")?.value || "" }; }

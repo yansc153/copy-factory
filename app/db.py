@@ -30,6 +30,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             author TEXT NOT NULL DEFAULT '',
             published_at TEXT NOT NULL DEFAULT '',
             media_urls TEXT NOT NULL DEFAULT '[]',
+            selected_media_url TEXT NOT NULL DEFAULT '',
             content_hash TEXT NOT NULL,
             sync_batch TEXT NOT NULL,
             generation_status TEXT NOT NULL DEFAULT 'pending',
@@ -85,6 +86,8 @@ def ensure_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE source_items ADD COLUMN schedule_status TEXT NOT NULL DEFAULT 'unscheduled'")
     if "scheduled_at" not in columns:
         conn.execute("ALTER TABLE source_items ADD COLUMN scheduled_at TEXT NOT NULL DEFAULT ''")
+    if "selected_media_url" not in columns:
+        conn.execute("ALTER TABLE source_items ADD COLUMN selected_media_url TEXT NOT NULL DEFAULT ''")
     for name in (
         "publish_status",
         "publish_confirmed_at",
@@ -111,7 +114,9 @@ def hash_text(text: str) -> str:
 
 
 def insert_source_item(conn: sqlite3.Connection, item: dict[str, Any], sync_batch: str) -> tuple[int, bool]:
-    media_urls = json.dumps(item.get("media_urls", []), ensure_ascii=False)
+    media = item.get("media_urls", [])
+    media_urls = json.dumps(media, ensure_ascii=False)
+    selected_media_url = str(media[0]) if media and isinstance(media[0], str) else ""
     content_hash = hash_text(f"{item.get('title', '')}\n{item.get('text', '')}")
     ts = now()
     existing = conn.execute(
@@ -133,9 +138,9 @@ def insert_source_item(conn: sqlite3.Connection, item: dict[str, Any], sync_batc
     cur = conn.execute(
         """
         INSERT INTO source_items (
-            source, source_id, url, title, text, author, published_at, media_urls,
+            source, source_id, url, title, text, author, published_at, media_urls, selected_media_url,
             content_hash, sync_batch, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             item["source"],
@@ -146,6 +151,7 @@ def insert_source_item(conn: sqlite3.Connection, item: dict[str, Any], sync_batc
             item.get("author", ""),
             item.get("published_at", ""),
             media_urls,
+            selected_media_url,
             content_hash,
             sync_batch,
             ts,
@@ -170,13 +176,14 @@ def save_generation(conn: sqlite3.Connection, item_id: int, copy: str, error: st
     conn.commit()
 
 
-def save_review(conn: sqlite3.Connection, item_id: int, edited_copy: str, status: str) -> bool:
+def save_review(conn: sqlite3.Connection, item_id: int, edited_copy: str, status: str, selected_media_url: str | None = None) -> bool:
     if status not in {"draft", "approved", "rejected"}:
         raise ValueError("status must be draft, approved, or rejected")
     cur = conn.execute(
         """
         UPDATE source_items
         SET edited_copy = ?, review_status = ?,
+            selected_media_url = COALESCE(?, selected_media_url),
             publish_status = CASE
                 WHEN ? != 'approved' THEN 'none'
                 WHEN publish_status IN ('confirmed', 'failed') THEN 'none'
@@ -190,7 +197,7 @@ def save_review(conn: sqlite3.Connection, item_id: int, edited_copy: str, status
             updated_at = ?
         WHERE id = ? AND publish_status NOT IN ('claimed', 'published')
         """,
-        (edited_copy, status, status, status, status, status, status, status, now(), item_id),
+        (edited_copy, status, selected_media_url, status, status, status, status, status, status, now(), item_id),
     )
     conn.commit()
     return int(cur.rowcount) == 1
