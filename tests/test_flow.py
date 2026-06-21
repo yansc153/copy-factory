@@ -239,6 +239,45 @@ class CopyFactoryFlowTest(unittest.TestCase):
         self.assertEqual(len(db.items_for_work_date(conn, "")), 3)
         conn.close()
 
+    def test_work_date_uses_observed_at_before_published_at(self) -> None:
+        conn = db.connect(f"{self.tmp.name}/observed.sqlite3")
+        db.init_db(conn)
+        try:
+            db.insert_source_item(
+                conn,
+                {
+                    "source": "xueqiu",
+                    "source_id": "observed-today",
+                    "url": "https://xueqiu.example/observed",
+                    "title": "observed",
+                    "text": "observed",
+                    "author": "",
+                    "published_at": "2026-06-21T06:53:16Z",
+                    "observed_at": "2026-06-21T18:16:49Z",
+                    "media_urls": [],
+                },
+                "batch",
+            )
+            db.insert_source_item(
+                conn,
+                {
+                    "source": "xueqiu",
+                    "source_id": "fallback-published",
+                    "url": "https://xueqiu.example/fallback",
+                    "title": "fallback",
+                    "text": "fallback",
+                    "author": "",
+                    "published_at": "2026-06-21T06:53:16Z",
+                    "media_urls": [],
+                },
+                "batch",
+            )
+
+            self.assertEqual([row["source_id"] for row in db.items_for_work_date(conn, "2026-06-22")], ["observed-today"])
+            self.assertEqual([row["source_id"] for row in db.items_for_work_date(conn, "2026-06-21")], ["fallback-published"])
+        finally:
+            conn.close()
+
     def test_real_export_uses_health_generated_at_gate(self) -> None:
         calls = {"export": []}
         old_health = adapters.fetch_health
@@ -348,7 +387,8 @@ class CopyFactoryFlowTest(unittest.TestCase):
                     "title": "old",
                     "text": "old",
                     "author": "",
-                    "published_at": "2026-06-19T23:59:59Z",
+                    "published_at": "2026-06-20T08:00:00Z",
+                    "observed_at": "2026-06-19T23:59:59Z",
                     "media_urls": [],
                 },
                 {
@@ -358,7 +398,8 @@ class CopyFactoryFlowTest(unittest.TestCase):
                     "title": "kept",
                     "text": "kept",
                     "author": "",
-                    "published_at": "2026-06-20T08:00:00Z",
+                    "published_at": "2026-06-19T23:59:59Z",
+                    "observed_at": "2026-06-20T08:00:00Z",
                     "media_urls": [],
                 },
             ]

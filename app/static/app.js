@@ -144,11 +144,14 @@ function itemCard(item, compact = false, context = "") {
   const copy = (item.edited_copy || item.generated_copy || item.text || "").slice(0, compact ? 90 : 280);
   const scheduled = item.scheduled_at ? formatSlot(item.scheduled_at) : "";
   const label = sourceLabel(sourceKind(item));
+  const observed = item.observed_at ? `抓取 ${item.observed_at.slice(0, 16).replace("T", " ")}` : "";
+  const published = item.published_at ? `原文 ${item.published_at.slice(0, 16).replace("T", " ")}` : "";
+  const timeLine = [observed, published].filter(Boolean).join(" · ");
   return `<article class="${compact ? "mini-card" : "feed-item"}" draggable="${canMove(item)}" ondragstart="dragItem(event, ${item.id})">
     ${compact ? "" : `<div class="avatar ${sourceKind(item)}">${h(label[0]?.toUpperCase() || "C")}</div>`}
     <div class="item-body">
       <div class="item-head">
-        <span class="source-line">${h(label)} ${item.published_at ? "· " + h(item.published_at.slice(0, 16).replace("T", " ")) : ""}</span>
+        <span class="source-line">${h(label)} ${timeLine ? "· " + h(timeLine) : ""}</span>
         <span class="item-title">${h(item.title || "Untitled")}</span>
         <span class="pill ${item.review_status}">${item.review_status}</span>
         <span class="pill">${item.generation_status}</span>
@@ -187,7 +190,7 @@ function editorView() {
   }).join("")}</div>` : `<p class="muted">这条来源没有图片。</p>`;
   return shell(`<div class="topbar editor-title"><button class="small-btn" onclick="go('review')">返回列表</button><h1>编辑文案</h1><span class="pill ${item.review_status}">${item.review_status}</span></div>
     <div class="editor">
-      <section class="source-pane"><h1>${h(item.title)}</h1><p class="muted">${h(item.source)} · ${h(item.published_at)} · <a href="${h(item.url)}" target="_blank">原文链接</a></p><h2>原文</h2><pre>${h(item.text)}</pre><h2>图片引用</h2>${mediaGrid(item)}</section>
+      <section class="source-pane"><h1>${h(item.title)}</h1><p class="muted">${h(item.source)} · 抓取 ${h(item.observed_at || "")} · 原文 ${h(item.published_at)} · <a href="${h(item.url)}" target="_blank">原文链接</a></p><h2>原文</h2><pre>${h(item.text)}</pre><h2>图片引用</h2>${mediaGrid(item)}</section>
       <section class="edit-pane"><h2>生成文案</h2><textarea id="copy">${h(item.edited_copy || item.generated_copy)}</textarea><h2>选择配图</h2>${mediaChoices}<div class="form-grid"><button class="wide-btn" onclick="saveReview(${item.id}, 'draft')">保存草稿</button><button class="wide-btn" onclick="saveReview(${item.id}, 'approved')">批准</button><button class="small-btn danger" onclick="saveReview(${item.id}, 'rejected')">拒绝</button><button class="small-btn" onclick="go('schedule')">去排期</button></div><p class="muted">生成状态：${h(item.generation_status)} ${h(item.generation_error || "")}</p></section>
       <section class="preview-pane"><h2>预览</h2><div class="post-preview"><div class="preview-avatar">CF</div><strong>Copy Factory</strong><p>${h(item.edited_copy || item.generated_copy)}</p>${selectedMedia(item) ? `<img src="${h(selectedMedia(item))}" alt="预览配图">` : ""}</div><label>发布时间<input value="${h(formatSlot(item.scheduled_at || nextSlots()[0]))}" disabled></label></section>
     </div>`);

@@ -7,6 +7,10 @@ import sqlite3
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
+
+
+SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def connect(path: str) -> sqlite3.Connection:
@@ -29,6 +33,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             text TEXT NOT NULL,
             author TEXT NOT NULL DEFAULT '',
             published_at TEXT NOT NULL DEFAULT '',
+            observed_at TEXT NOT NULL DEFAULT '',
             media_urls TEXT NOT NULL DEFAULT '[]',
             selected_media_url TEXT NOT NULL DEFAULT '',
             work_date TEXT NOT NULL DEFAULT '',
@@ -91,6 +96,8 @@ def ensure_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE source_items ADD COLUMN selected_media_url TEXT NOT NULL DEFAULT ''")
     if "work_date" not in columns:
         conn.execute("ALTER TABLE source_items ADD COLUMN work_date TEXT NOT NULL DEFAULT ''")
+    if "observed_at" not in columns:
+        conn.execute("ALTER TABLE source_items ADD COLUMN observed_at TEXT NOT NULL DEFAULT ''")
     conn.execute("UPDATE source_items SET work_date = substr(created_at, 1, 10) WHERE work_date = ''")
     for name in (
         "publish_status",
@@ -111,6 +118,28 @@ def now() -> str:
 
 def work_today() -> str:
     return date.today().isoformat()
+
+
+def parse_item_time(value: str) -> datetime | None:
+    if not value:
+        return None
+    value = value.strip()
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def observed_value(item: dict[str, Any]) -> str:
+    return str(item.get("observed_at") or item.get("fetched_at") or item.get("published_at") or "")
+
+
+def work_date_for_item(item: dict[str, Any]) -> str:
+    observed = parse_item_time(observed_value(item))
+    return observed.astimezone(SHANGHAI).date().isoformat() if observed else work_today()
 
 
 def due_now() -> str:
@@ -146,9 +175,9 @@ def insert_source_item(conn: sqlite3.Connection, item: dict[str, Any], sync_batc
     cur = conn.execute(
         """
         INSERT INTO source_items (
-            source, source_id, url, title, text, author, published_at, media_urls, selected_media_url,
+            source, source_id, url, title, text, author, published_at, observed_at, media_urls, selected_media_url,
             work_date, content_hash, sync_batch, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             item["source"],
@@ -158,9 +187,10 @@ def insert_source_item(conn: sqlite3.Connection, item: dict[str, Any], sync_batc
             item["text"],
             item.get("author", ""),
             item.get("published_at", ""),
+            observed_value(item),
             media_urls,
             selected_media_url,
-            work_today(),
+            work_date_for_item(item),
             content_hash,
             sync_batch,
             ts,

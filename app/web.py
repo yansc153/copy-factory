@@ -300,6 +300,7 @@ def row_to_item(row) -> dict[str, object]:
         "text": row["text"],
         "author": row["author"],
         "published_at": row["published_at"],
+        "observed_at": row["observed_at"],
         "media_urls": json.loads(row["media_urls"]),
         "selected_media_url": row["selected_media_url"],
         "work_date": row["work_date"],

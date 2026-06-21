@@ -128,12 +128,12 @@ def filter_by_window(items: list[dict[str, Any]], config: Config) -> list[dict[s
         return items
     kept = []
     for item in items:
-        published = parse_time(str(item.get("published_at", "")))
-        if not published:
+        observed = parse_time(str(item.get("observed_at") or item.get("fetched_at") or item.get("published_at") or ""))
+        if not observed:
             continue
-        if since and published < since:
+        if since and observed < since:
             continue
-        if until and published >= until:
+        if until and observed >= until:
             continue
         kept.append(item)
     return kept
