@@ -2,6 +2,8 @@
 
 Single-user copy review workbench for Xueqiu/Reddit snapshot sync, dedupe, Huajiao-style draft generation, manual approval, drag-to-schedule planning, and a server-side publish queue for a future Mac mini publisher.
 
+Deployment and Mac mini API contract: [docs/deployment-and-mac-mini-spec.md](docs/deployment-and-mac-mini-spec.md).
+
 ## Local Run
 
 ```bash
