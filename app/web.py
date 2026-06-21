@@ -157,7 +157,9 @@ class Handler(BaseHTTPRequestHandler):
         db.init_db(conn)
         try:
             if path == "/api/items":
-                self.send_json({"items": [row_to_item(row) for row in db.today_items(conn)]})
+                query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
+                work_date = str((query.get("work_date") or [db.work_today()])[0])
+                self.send_json({"items": [row_to_item(row) for row in db.items_for_work_date(conn, work_date)]})
             elif path.startswith("/api/items/"):
                 item = db.get_item(conn, int(path.split("/")[3]))
                 self.send_json({"item": row_to_item(item) if item else None}, 200 if item else 404)
@@ -300,6 +302,7 @@ def row_to_item(row) -> dict[str, object]:
         "published_at": row["published_at"],
         "media_urls": json.loads(row["media_urls"]),
         "selected_media_url": row["selected_media_url"],
+        "work_date": row["work_date"],
         "generation_status": row["generation_status"],
         "generation_error": row["generation_error"],
         "generated_copy": row["generated_copy"],

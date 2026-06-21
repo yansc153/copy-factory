@@ -18,6 +18,7 @@ make run
 Open `http://127.0.0.1:8000` and log in with `admin / password`. The app has four main work areas:
 
 - Review: Twitter-like feed for generated copy, source text, and media references.
+- Daily workbench: synced items are grouped by work date, with Today / Yesterday / All filters so skipped drafts stay available without cluttering the next morning.
 - Sync: preview latest snapshot count before running generation.
 - Schedule: drag approved copy into time slots, then confirm the publish plan.
 - Settings: runtime credential and deployment status.

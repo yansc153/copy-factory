@@ -1,4 +1,4 @@
-const state = { view: "review", items: [], selected: null, settings: null, publishQueue: [], lastResult: null };
+const state = { view: "review", items: [], selected: null, settings: null, publishQueue: [], lastResult: null, workDate: todayKey() };
 
 const $ = (sel) => document.querySelector(sel);
 function h(value) {
@@ -15,6 +15,16 @@ const api = (path, body) => fetch(path, {
   headers: body ? { "Content-Type": "application/json" } : {},
   body: body ? JSON.stringify(body) : undefined,
 }).then((r) => r.ok ? r.json() : Promise.reject(r));
+
+function dateKey(offset = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${month}-${day}`;
+}
+function todayKey() { return dateKey(0); }
+function yesterdayKey() { return dateKey(-1); }
 
 function mediaUrl(ref) {
   if (!ref) return "";
@@ -42,7 +52,8 @@ function canMove(item) {
 }
 
 async function load() {
-  const [items, settings, queue] = await Promise.all([api("/api/items"), api("/api/settings/status"), api("/api/publish/queue")]);
+  const itemPath = `/api/items?work_date=${encodeURIComponent(state.workDate)}`;
+  const [items, settings, queue] = await Promise.all([api(itemPath), api("/api/settings/status"), api("/api/publish/queue")]);
   state.items = items.items;
   state.settings = settings;
   state.publishQueue = queue.tasks;
@@ -62,7 +73,14 @@ function shell(content, side = "") {
 
 function statBar() {
   const c = counts();
-  return `<div class="stats">
+  const dayLabel = state.workDate || "全部";
+  return `<div class="date-tabs">
+    <button class="${state.workDate === todayKey() ? "active" : ""}" onclick="setWorkDate('${todayKey()}')">今日</button>
+    <button class="${state.workDate === yesterdayKey() ? "active" : ""}" onclick="setWorkDate('${yesterdayKey()}')">昨日</button>
+    <button class="${state.workDate === "" ? "active" : ""}" onclick="setWorkDate('')">全部</button>
+    <input type="date" value="${h(state.workDate)}" onchange="setWorkDate(this.value)">
+    <span class="muted">当前：${h(dayLabel)}</span>
+  </div><div class="stats">
     <span class="chip">全部 <strong>${c.all}</strong></span>
     <span class="chip">待审 <strong>${c.draft}</strong></span>
     <span class="chip">通过 <strong>${c.approved}</strong></span>
@@ -110,7 +128,7 @@ function reviewView() {
   const side = `<div class="panel"><h2>队列概览</h2>${Object.entries(counts()).map(([k,v]) => `<div class="kv"><span>${k}</span><strong>${v}</strong></div>`).join("")}</div>
     <div class="panel soft"><h2>运行规则</h2><p class="muted">先看 health.generated_at，变了才拉 export。入库按 source_id / url / hash 去重。</p></div>`;
   const items = state.items.map((item) => itemCard(item)).join("") || `<p class="panel">暂无文案。去同步页运行一个批次。</p>`;
-  return shell(`<div class="topbar"><h1>内容审核工作台</h1><p class="muted">最新快照进来后，只处理新增。审核通过后可以拖到排期时间线。</p>${statBar()}</div>${items}`, side);
+  return shell(`<div class="topbar"><h1>内容审核工作台</h1><p class="muted">每天同步进来的内容按日期分开；昨天没选上的会保留在昨天或全部里。</p>${statBar()}</div>${items}`, side);
 }
 
 function editorView() {
@@ -202,6 +220,7 @@ function render() {
   $("#app").innerHTML = views[state.view]();
 }
 async function go(view) { state.view = view; await refresh(); }
+async function setWorkDate(value) { state.workDate = value; await refresh(); }
 function openItem(id) { state.selected = state.items.find((x) => x.id === id); state.view = "editor"; render(); }
 async function saveReview(id, status) {
   const text = $("#copy")?.value ?? state.items.find((x) => x.id === id)?.edited_copy ?? "";

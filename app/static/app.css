@@ -68,6 +68,18 @@ h1 { margin: 0; font-size: 26px; line-height: 1.1; }
 h2 { margin: 0; font-size: 18px; line-height: 1.2; }
 .muted { color: var(--muted); font-size: 13px; line-height: 1.45; }
 .stats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.date-tabs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
+.date-tabs button {
+  border: 1px solid var(--line);
+  background: white;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-weight: 750;
+  font-size: 13px;
+}
+.date-tabs button.active { border-color: #b8ddff; background: #edf7ff; color: var(--blue); }
+.date-tabs input { width: auto; min-width: 150px; padding: 7px 10px; }
 .chip {
   border: 1px solid var(--line);
   border-radius: 999px;

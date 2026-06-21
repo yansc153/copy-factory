@@ -4,7 +4,7 @@ import hashlib
 import json
 import secrets
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +31,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             published_at TEXT NOT NULL DEFAULT '',
             media_urls TEXT NOT NULL DEFAULT '[]',
             selected_media_url TEXT NOT NULL DEFAULT '',
+            work_date TEXT NOT NULL DEFAULT '',
             content_hash TEXT NOT NULL,
             sync_batch TEXT NOT NULL,
             generation_status TEXT NOT NULL DEFAULT 'pending',
@@ -88,6 +89,9 @@ def ensure_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE source_items ADD COLUMN scheduled_at TEXT NOT NULL DEFAULT ''")
     if "selected_media_url" not in columns:
         conn.execute("ALTER TABLE source_items ADD COLUMN selected_media_url TEXT NOT NULL DEFAULT ''")
+    if "work_date" not in columns:
+        conn.execute("ALTER TABLE source_items ADD COLUMN work_date TEXT NOT NULL DEFAULT ''")
+    conn.execute("UPDATE source_items SET work_date = substr(created_at, 1, 10) WHERE work_date = ''")
     for name in (
         "publish_status",
         "publish_confirmed_at",
@@ -103,6 +107,10 @@ def ensure_columns(conn: sqlite3.Connection) -> None:
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def work_today() -> str:
+    return date.today().isoformat()
 
 
 def due_now() -> str:
@@ -139,8 +147,8 @@ def insert_source_item(conn: sqlite3.Connection, item: dict[str, Any], sync_batc
         """
         INSERT INTO source_items (
             source, source_id, url, title, text, author, published_at, media_urls, selected_media_url,
-            content_hash, sync_batch, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            work_date, content_hash, sync_batch, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             item["source"],
@@ -152,6 +160,7 @@ def insert_source_item(conn: sqlite3.Connection, item: dict[str, Any], sync_batc
             item.get("published_at", ""),
             media_urls,
             selected_media_url,
+            work_today(),
             content_hash,
             sync_batch,
             ts,
@@ -317,8 +326,14 @@ def save_publish_result(conn: sqlite3.Connection, item_id: int, claim_token: str
     return int(cur.rowcount) == 1
 
 
+def items_for_work_date(conn: sqlite3.Connection, work_date: str = "") -> list[sqlite3.Row]:
+    if not work_date:
+        return list(conn.execute("SELECT * FROM source_items ORDER BY work_date DESC, updated_at DESC, id DESC"))
+    return list(conn.execute("SELECT * FROM source_items WHERE work_date = ? ORDER BY updated_at DESC, id DESC", (work_date,)))
+
+
 def today_items(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return list(conn.execute("SELECT * FROM source_items ORDER BY updated_at DESC, id DESC"))
+    return items_for_work_date(conn, work_today())
 
 
 def get_item(conn: sqlite3.Connection, item_id: int) -> sqlite3.Row | None:

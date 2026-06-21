@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from datetime import date, timedelta
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlencode
@@ -206,6 +207,20 @@ class CopyFactoryFlowTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("DEEPSEEK_API_KEY", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
+
+    def test_items_are_split_by_work_date(self) -> None:
+        run_sync(self.config)
+        today = date.today().isoformat()
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        conn = db.connect(self.config.db_path)
+        db.init_db(conn)
+        first_id = conn.execute("SELECT id FROM source_items ORDER BY id LIMIT 1").fetchone()["id"]
+        conn.execute("UPDATE source_items SET work_date = ? WHERE id = ?", (yesterday, first_id))
+        conn.commit()
+        self.assertEqual(len(db.items_for_work_date(conn, today)), 2)
+        self.assertEqual(len(db.items_for_work_date(conn, yesterday)), 1)
+        self.assertEqual(len(db.items_for_work_date(conn, "")), 3)
+        conn.close()
 
     def test_real_export_uses_health_generated_at_gate(self) -> None:
         calls = {"export": 0}
