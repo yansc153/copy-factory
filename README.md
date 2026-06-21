@@ -184,7 +184,7 @@ Confirmed or failed items can be edited and then reconfirmed. Claimed or publish
 - Manual or scheduled mock sync.
 - Deduped SQLite storage.
 - Raw text, source, URL, media references, sync batch, generation status, and errors.
-- Huajiao writer bridge with fake local writer or DeepSeek script.
+- Huajiao writer bridge with fake local writer or DeepSeek script. Chinese sources such as Xueqiu are rewritten in Chinese directly; English sources such as Reddit are first localized into Chinese investment context before draft generation.
 - Review pool with edit and `draft` / `approved` / `rejected` save.
 - Sync preview/run console with recent batch history.
 - Drag schedule timeline for approved copy.

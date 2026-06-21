@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 
 from app import db
 from app import adapters
+from app import writer
 from app.config import Config
 from app.sync import run_sync
 from app.web import Handler
@@ -181,6 +182,13 @@ class CopyFactoryFlowTest(unittest.TestCase):
         config = Config(db_path=f"{self.tmp.name}/prod-token.sqlite3", app_env="production", user="u", password="p", session_secret="s")
         with self.assertRaisesRegex(RuntimeError, "COPY_FACTORY_PUBLISH_TOKEN"):
             config.validate_for_web()
+
+    def test_local_writer_localizes_english_sources_to_chinese(self) -> None:
+        item = adapters.mock_reddit()[0]
+        copy = writer.fake_writer(item)
+        self.assertIn("海外投资者讨论 AI 资本开支", copy)
+        self.assertNotIn("Investors debate", copy)
+        self.assertNotIn("A thread on large-cap tech", copy)
 
     def test_real_export_uses_health_generated_at_gate(self) -> None:
         calls = {"export": 0}
