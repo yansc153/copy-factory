@@ -101,9 +101,11 @@ Project checks:
 - `make test`
 - `make build`
 
-## Explicitly Out of Scope
+## Current Publish Boundary
 
-No Mac mini auto posting, X/Twitter login, drag-and-drop scheduling, image publishing, team permissions, billing, analytics dashboard, or commercial admin backend.
+The app now owns drag-and-drop scheduling plus a server-side publish queue. The browser stores scheduled times as UTC ISO strings and renders them locally. Clicking confirm moves approved, scheduled items into `confirmed`; a future Mac mini worker can claim due tasks by server clock and write back `published` or `failed`.
+
+Still out of scope: Mac mini auto posting implementation, X/Twitter login, browser cookie storage, image publishing automation, team permissions, billing, analytics dashboard, or commercial admin backend.
 
 ## Self-Review
 

@@ -1,4 +1,4 @@
-const state = { view: "review", items: [], selected: null, settings: null, lastResult: null };
+const state = { view: "review", items: [], selected: null, settings: null, publishQueue: [], lastResult: null };
 
 const $ = (sel) => document.querySelector(sel);
 function h(value) {
@@ -29,13 +29,19 @@ function counts() {
     approved: state.items.filter((x) => x.review_status === "approved").length,
     rejected: state.items.filter((x) => x.review_status === "rejected").length,
     scheduled: state.items.filter((x) => x.schedule_status === "scheduled").length,
+    confirmed: state.items.filter((x) => x.publish_status === "confirmed").length,
   };
 }
 
+function canMove(item) {
+  return item.review_status === "approved" && ["none", "failed"].includes(item.publish_status || "none");
+}
+
 async function load() {
-  const [items, settings] = await Promise.all([api("/api/items"), api("/api/settings/status")]);
+  const [items, settings, queue] = await Promise.all([api("/api/items"), api("/api/settings/status"), api("/api/publish/queue")]);
   state.items = items.items;
   state.settings = settings;
+  state.publishQueue = queue.tasks;
 }
 
 function shell(content, side = "") {
@@ -69,10 +75,10 @@ function mediaGrid(item) {
   }).join("")}</div>`;
 }
 
-function itemCard(item, compact = false) {
+function itemCard(item, compact = false, context = "") {
   const copy = (item.edited_copy || item.generated_copy || item.text || "").slice(0, compact ? 90 : 280);
   const scheduled = item.scheduled_at ? formatSlot(item.scheduled_at) : "";
-  return `<article class="${compact ? "mini-card" : "feed-item"}" draggable="${item.review_status === "approved"}" ondragstart="dragItem(event, ${item.id})">
+  return `<article class="${compact ? "mini-card" : "feed-item"}" draggable="${canMove(item)}" ondragstart="dragItem(event, ${item.id})">
     ${compact ? "" : `<div class="avatar">${h(item.source[0]?.toUpperCase() || "C")}</div>`}
     <div>
       <div class="item-head">
@@ -81,15 +87,16 @@ function itemCard(item, compact = false) {
         <span class="pill ${item.review_status}">${item.review_status}</span>
         <span class="pill">${item.generation_status}</span>
         ${item.schedule_status === "scheduled" ? `<span class="pill approved">${h(scheduled)}</span>` : ""}
+        ${item.publish_status && item.publish_status !== "none" ? `<span class="pill publish">${h(item.publish_status)}</span>` : ""}
       </div>
       <p class="copy">${h(copy)}</p>
       ${compact ? "" : mediaGrid(item)}
-      <div class="actions">
+      ${compact && context === "pool" ? `<div class="actions"><button onclick="quickSchedule(${item.id})">排到下一槽</button></div>` : compact ? "" : `<div class="actions">
         <button class="primary" onclick="openItem(${item.id})">编辑文案</button>
         <button onclick="quickReview(${item.id}, 'approved')">批准</button>
         <button onclick="quickReview(${item.id}, 'rejected')" class="danger">拒绝</button>
         <span class="muted">图片引用 ${item.media_urls.length}</span>
-      </div>
+      </div>`}
     </div>
   </article>`;
 }
@@ -130,14 +137,18 @@ function resultBlock(r) {
 function scheduleView() {
   const approved = state.items.filter((x) => x.review_status === "approved" && x.schedule_status !== "scheduled");
   const slots = nextSlots();
-  return shell(`<div class="topbar"><h1>拖拽排期时间线</h1><p class="muted">把 approved 文案拖到时间槽。这里只保存排期，不自动发布。</p>${statBar()}</div>
-    <div class="timeline"><aside class="approved-pool"><h2>可排期</h2>${approved.map((x) => itemCard(x, true)).join("") || `<p class="muted">没有未排期 approved 文案。</p>`}</aside><section class="slot-grid">${slots.map(slotView).join("")}</section></div>`);
+  return shell(`<div class="topbar"><h1>拖拽排期时间线</h1><p class="muted">把 approved 文案拖到时间槽，再确认发布计划；确认后 server 队列等待 Mac mini 到点领取。</p>${statBar()}</div>
+    <div class="timeline"><aside class="approved-pool"><h2>可排期</h2>${approved.map((x) => itemCard(x, true, "pool")).join("") || `<p class="muted">没有未排期 approved 文案。</p>`}</aside><section><div class="confirm-bar"><div><strong>${scheduledReady()} 条可确认</strong><p class="muted">当前队列 ${state.publishQueue.length} 条，confirmed ${state.publishQueue.filter((x) => x.status === "confirmed").length} 条。</p></div><button class="primary" onclick="confirmPublishPlan()">确认发布计划</button></div><div class="slot-grid">${slots.map(slotView).join("")}</div></section></div>`);
+}
+
+function scheduledReady() {
+  return state.items.filter((x) => x.review_status === "approved" && x.schedule_status === "scheduled" && ["none", "failed"].includes(x.publish_status)).length;
 }
 
 function slotView(slot) {
   const items = state.items.filter((x) => x.scheduled_at === slot);
   const parts = formatSlotParts(slot);
-  return `<div class="slot" ondragover="allowDrop(event)" ondragleave="event.currentTarget.classList.remove('dragover')" ondrop="dropItem(event, '${slot}')"><time>${parts.time}</time><em>${parts.day}</em>${items.map((x) => itemCard(x, true) + `<button class="small-btn" onclick="unschedule(${x.id})">移出排期</button>`).join("")}</div>`;
+  return `<div class="slot" ondragover="allowDrop(event)" ondragleave="event.currentTarget.classList.remove('dragover')" ondrop="dropItem(event, '${slot}')"><time>${parts.time}</time><em>${parts.day}</em>${items.map((x) => itemCard(x, true) + (canMove(x) ? `<button class="small-btn" onclick="unschedule(${x.id})">移出排期</button>` : "")).join("")}</div>`;
 }
 
 function settingsView() {
@@ -156,7 +167,7 @@ function nextSlots() {
       const date = new Date(base);
       date.setDate(base.getDate() + d);
       date.setHours(h, 0, 0, 0);
-      slots.push(date.toISOString().slice(0, 16));
+      slots.push(date.toISOString());
     }
   }
   return slots;
@@ -204,5 +215,13 @@ async function dropItem(event, scheduled_at) {
   await refresh();
 }
 async function unschedule(id) { await api(`/api/items/${id}/unschedule`, {}); await refresh(); }
+async function quickSchedule(id) { await api(`/api/items/${id}/schedule`, { scheduled_at: nextSlots()[0] }); await refresh(); }
+async function confirmPublishPlan() {
+  const result = await api("/api/publish/confirm_plan", {});
+  state.publishQueue = result.tasks;
+  await refresh();
+  state.view = "schedule";
+  render();
+}
 
 refresh().catch((err) => { $("#app").innerHTML = `<main class="panel"><h1>加载失败</h1><pre>${err}</pre></main>`; });

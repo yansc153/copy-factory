@@ -65,3 +65,10 @@
 - Spec coverage: auth, adapters, 30-minute scheduler entry, dedupe, raw/media/batch/status/error persistence, writing harness, review pool, edit save, deployment docs, and verification are covered.
 - Placeholder scan: no `TBD`, `TODO`, or undefined future tasks.
 - Type consistency: functions and file names match the design.
+
+## 2026-06-21 Publish Queue Addendum
+
+- Add SQLite publish status fields to scheduled items.
+- Add browser confirmation for approved scheduled items.
+- Add publish API for queue listing, due-task claiming, and `published` / `failed` writeback.
+- Keep Mac mini posting, X/Twitter login, browser cookies, and external publishing outside this repo.

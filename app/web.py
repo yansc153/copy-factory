@@ -31,6 +31,14 @@ def valid_session(header: str | None, config: Config) -> bool:
     return value == config.user and hmac.compare_digest(sig, sign(value, config.session_secret))
 
 
+def valid_publish_token(header: str | None, config: Config) -> bool:
+    token = config.mac_mini_token()
+    prefix = "Bearer "
+    if not token or not header or not header.startswith(prefix):
+        return False
+    return hmac.compare_digest(header.removeprefix(prefix), token)
+
+
 class Handler(BaseHTTPRequestHandler):
     config = Config()
 
@@ -80,6 +88,12 @@ class Handler(BaseHTTPRequestHandler):
             self.redirect("/login")
         return False
 
+    def require_publish_api(self) -> bool:
+        if valid_session(self.headers.get("Cookie"), self.config) or valid_publish_token(self.headers.get("Authorization"), self.config):
+            return True
+        self.send_json({"error": "unauthorized"}, 401)
+        return False
+
     def read_form(self) -> dict[str, str]:
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length).decode()
@@ -102,7 +116,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/static/app.css" or self.require_login():
                 self.send_static(path.removeprefix("/static/"))
         elif path.startswith("/api/"):
-            if self.require_login():
+            if (path.startswith("/api/publish/") and self.require_publish_api()) or (
+                not path.startswith("/api/publish/") and self.require_login()
+            ):
                 self.api_get(path)
         else:
             self.send_error(404)
@@ -120,7 +136,13 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.login_page("登录失败")
         elif path.startswith("/api/"):
-            if self.require_login():
+            if path == "/api/publish/confirm_plan":
+                if self.require_login():
+                    self.api_post(path)
+            elif path.startswith("/api/publish/"):
+                if self.require_publish_api():
+                    self.api_post(path)
+            elif self.require_login():
                 self.api_post(path)
         else:
             self.send_error(404)
@@ -150,9 +172,12 @@ class Handler(BaseHTTPRequestHandler):
                         "export_limit": self.config.export_limit,
                         "has_export_token": bool(self.config.news_harness_token()),
                         "has_deepseek_key": writer.has_deepseek_key(),
+                        "has_publish_token": bool(self.config.mac_mini_token()),
                         "runs": [row_to_run(row) for row in db.recent_sync_runs(conn)],
                     }
                 )
+            elif path == "/api/publish/queue":
+                self.send_json({"tasks": [row_to_publish_task(row) for row in db.publish_queue(conn)]})
             else:
                 self.send_error(404)
         finally:
@@ -170,6 +195,12 @@ class Handler(BaseHTTPRequestHandler):
             self.save_schedule_api(path, payload)
         elif path.startswith("/api/items/") and path.endswith("/unschedule"):
             self.clear_schedule_api(path)
+        elif path == "/api/publish/confirm_plan":
+            self.confirm_publish_plan_api()
+        elif path == "/api/publish/claim_due":
+            self.claim_due_api(payload)
+        elif path == "/api/publish/result":
+            self.publish_result_api(payload)
         else:
             self.send_error(404)
 
@@ -186,7 +217,9 @@ class Handler(BaseHTTPRequestHandler):
         conn = db.connect(self.config.db_path)
         db.init_db(conn)
         try:
-            db.save_review(conn, item_id, str(payload.get("edited_copy", "")), str(payload.get("status", "draft")))
+            if not db.save_review(conn, item_id, str(payload.get("edited_copy", "")), str(payload.get("status", "draft"))):
+                self.send_json({"error": "item is locked for publishing"}, 409)
+                return
             self.send_json({"item": row_to_item(db.get_item(conn, item_id))})
         finally:
             conn.close()
@@ -196,7 +229,9 @@ class Handler(BaseHTTPRequestHandler):
         conn = db.connect(self.config.db_path)
         db.init_db(conn)
         try:
-            db.save_schedule(conn, item_id, str(payload.get("scheduled_at", "")))
+            if not db.save_schedule(conn, item_id, str(payload.get("scheduled_at", ""))):
+                self.send_json({"error": "item is locked for publishing"}, 409)
+                return
             self.send_json({"item": row_to_item(db.get_item(conn, item_id))})
         finally:
             conn.close()
@@ -206,8 +241,43 @@ class Handler(BaseHTTPRequestHandler):
         conn = db.connect(self.config.db_path)
         db.init_db(conn)
         try:
-            db.clear_schedule(conn, item_id)
+            if not db.clear_schedule(conn, item_id):
+                self.send_json({"error": "item is locked for publishing"}, 409)
+                return
             self.send_json({"item": row_to_item(db.get_item(conn, item_id))})
+        finally:
+            conn.close()
+
+    def confirm_publish_plan_api(self) -> None:
+        conn = db.connect(self.config.db_path)
+        db.init_db(conn)
+        try:
+            confirmed = db.confirm_publish_plan(conn)
+            self.send_json({"confirmed": confirmed, "tasks": [row_to_publish_task(row) for row in db.publish_queue(conn)]})
+        finally:
+            conn.close()
+
+    def claim_due_api(self, payload: dict[str, object]) -> None:
+        conn = db.connect(self.config.db_path)
+        db.init_db(conn)
+        try:
+            tasks = db.claim_due(conn, db.due_now(), int(payload.get("limit") or 1))
+            self.send_json({"tasks": [row_to_publish_task(row, token) for row, token in tasks]})
+        finally:
+            conn.close()
+
+    def publish_result_api(self, payload: dict[str, object]) -> None:
+        item_id = int(payload.get("item_id") or 0)
+        claim_token = str(payload.get("claim_token") or "")
+        status = str(payload.get("status") or "")
+        error = str(payload.get("error") or "")
+        conn = db.connect(self.config.db_path)
+        db.init_db(conn)
+        try:
+            if not db.save_publish_result(conn, item_id, claim_token, status, error):
+                self.send_json({"error": "claim not found"}, 409)
+                return
+            self.send_json({"item": row_to_publish_task(db.get_item(conn, item_id))})
         finally:
             conn.close()
 
@@ -230,9 +300,36 @@ def row_to_item(row) -> dict[str, object]:
         "edited_copy": row["edited_copy"],
         "schedule_status": row["schedule_status"],
         "scheduled_at": row["scheduled_at"],
+        "publish_status": row["publish_status"],
+        "publish_confirmed_at": row["publish_confirmed_at"],
+        "publish_claimed_at": row["publish_claimed_at"],
+        "publish_result_at": row["publish_result_at"],
+        "publish_error": row["publish_error"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+
+def row_to_publish_task(row, claim_token: str = "") -> dict[str, object]:
+    item = row_to_item(row)
+    task = {
+        "item_id": item["id"],
+        "scheduled_at": item["scheduled_at"],
+        "status": item["publish_status"],
+        "copy": item["edited_copy"] or item["generated_copy"],
+        "source": item["source"],
+        "source_id": item["source_id"],
+        "source_url": item["url"],
+        "title": item["title"],
+        "media_urls": item["media_urls"],
+        "confirmed_at": item["publish_confirmed_at"],
+        "claimed_at": item["publish_claimed_at"],
+        "result_at": item["publish_result_at"],
+        "error": item["publish_error"],
+    }
+    if claim_token:
+        task["claim_token"] = claim_token
+    return task
 
 
 def row_to_run(row) -> dict[str, object]:

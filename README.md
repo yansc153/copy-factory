@@ -1,6 +1,6 @@
 # Copy Factory v1
 
-Single-user copy review workbench for Xueqiu/Reddit snapshot sync, dedupe, Huajiao-style draft generation, manual approval, and drag-to-schedule planning.
+Single-user copy review workbench for Xueqiu/Reddit snapshot sync, dedupe, Huajiao-style draft generation, manual approval, drag-to-schedule planning, and a server-side publish queue for a future Mac mini publisher.
 
 ## Local Run
 
@@ -19,8 +19,16 @@ Open `http://127.0.0.1:8000` and log in with `admin / password`. The app has fou
 
 - Review: Twitter-like feed for generated copy, source text, and media references.
 - Sync: preview latest snapshot count before running generation.
-- Schedule: drag approved copy into time slots without auto-posting.
+- Schedule: drag approved copy into time slots, then confirm the publish plan.
 - Settings: runtime credential and deployment status.
+
+Morning flow:
+
+1. Open the site and run sync if the scheduler has not already pulled the latest snapshot.
+2. Review generated drafts, edit today's copy, and save approved items.
+3. Drag approved items into time slots on Schedule. The browser stores UTC ISO timestamps and displays them in local time.
+4. Click "确认发布计划". The server marks due work as confirmed queue tasks.
+5. The future Mac mini publisher calls the publish API below, claims due tasks, posts externally, then writes back `published` or `failed`.
 
 ## Checks
 
@@ -75,6 +83,7 @@ Required for production:
 - `COPY_FACTORY_USER`
 - `COPY_FACTORY_PASSWORD`
 - `COPY_FACTORY_SESSION_SECRET`
+- `COPY_FACTORY_PUBLISH_TOKEN` or `COPY_FACTORY_PUBLISH_TOKEN_FILE`
 - `DEEPSEEK_API_KEY` or `DEEPSEEK_API_KEY_FILE`
 
 Local/test may omit DeepSeek credentials and will use deterministic fake writing. Production refuses generation without a key.
@@ -115,8 +124,22 @@ Platform scheduler:
 
 - Run the web process with `python3 -m app.web --host 0.0.0.0 --port 8000`.
 - Run `python3 scripts/sync_once.py` every 30 minutes.
-- Put DeepSeek and source credentials in platform secrets.
+- Put DeepSeek, source, and Mac mini publish API credentials in platform secrets.
 - Put the site behind HTTPS and basic platform firewall rules; the app itself is single-user session login, not a team permission system.
+
+VPS responsibilities:
+
+- Serve the authenticated review/schedule website.
+- Run the 30-minute sync job.
+- Store drafts, review status, schedule status, and publish queue state in SQLite.
+- Expose the publish API for the Mac mini worker.
+
+Mac mini responsibilities:
+
+- Keep its own browser/X login/session outside this project.
+- Poll and claim due tasks with `COPY_FACTORY_PUBLISH_TOKEN`.
+- Publish claimed copy and media through its own module.
+- Write the result back to this server.
 
 ## Web/API Surface
 
@@ -130,6 +153,21 @@ The browser app is served by `app.web` and talks to JSON endpoints:
 - `POST /api/items/:id/review`
 - `POST /api/items/:id/schedule`
 - `POST /api/items/:id/unschedule`
+- `POST /api/publish/confirm_plan` browser session only; confirms approved and scheduled items.
+- `GET /api/publish/queue` browser session or `Authorization: Bearer <COPY_FACTORY_PUBLISH_TOKEN>`; lists confirmed/claimed/published/failed tasks.
+- `POST /api/publish/claim_due` bearer token or browser session; body `{"limit":1}`; the server uses its own UTC clock, atomically marks due confirmed tasks as `claimed`, and returns `claim_token`.
+- `POST /api/publish/result` bearer token or browser session; body `{"item_id":1,"claim_token":"...","status":"published"}` or `{"item_id":1,"claim_token":"...","status":"failed","error":"..."}`.
+
+Publish state flow:
+
+`none -> confirmed -> claimed -> published`
+
+Failure flow:
+
+`none -> confirmed -> claimed -> failed`
+
+Rescheduling an item clears publish state back to `none`, so confirmation remains an explicit final step.
+Confirmed or failed items can be edited and then reconfirmed. Claimed or published items are locked from ordinary edit/reschedule actions.
 
 ## What Works Now
 
@@ -140,9 +178,12 @@ The browser app is served by `app.web` and talks to JSON endpoints:
 - Huajiao writer bridge with fake local writer or DeepSeek script.
 - Review pool with edit and `draft` / `approved` / `rejected` save.
 - Sync preview/run console with recent batch history.
-- Drag schedule timeline for approved copy. It only saves schedule metadata; it does not publish to X/Twitter.
+- Drag schedule timeline for approved copy.
+- Confirmed server publish queue with atomic due-task claiming and result writeback.
 
 ## Still Needed For Real Sources
 
 - A production export token in `NEWS_HARNESS_EXPORT_TOKEN` or `NEWS_HARNESS_EXPORT_TOKEN_FILE`.
 - DeepSeek production key or key file.
+- A production Mac mini publish token in `COPY_FACTORY_PUBLISH_TOKEN` or `COPY_FACTORY_PUBLISH_TOKEN_FILE`.
+- The Mac mini publisher module that claims tasks and performs external posting. This repo intentionally stops at the server API contract.

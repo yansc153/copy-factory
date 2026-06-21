@@ -12,6 +12,8 @@ class Config:
     user: str = os.getenv("COPY_FACTORY_USER", "admin")
     password: str = os.getenv("COPY_FACTORY_PASSWORD", "password")
     session_secret: str = os.getenv("COPY_FACTORY_SESSION_SECRET", "dev-secret-change-me")
+    publish_token: str = os.getenv("COPY_FACTORY_PUBLISH_TOKEN", "")
+    publish_token_file: str = os.getenv("COPY_FACTORY_PUBLISH_TOKEN_FILE", "")
     export_base_url: str = os.getenv("NEWS_HARNESS_EXPORT_BASE_URL", "https://newshardness.hellopepper.work")
     export_token: str = os.getenv("NEWS_HARNESS_EXPORT_TOKEN", "")
     export_token_file: str = os.getenv("NEWS_HARNESS_EXPORT_TOKEN_FILE", "")
@@ -34,6 +36,12 @@ class Config:
                 "COPY_FACTORY_SESSION_SECRET": self.session_secret == "dev-secret-change-me",
             }
             bad = [name for name, is_bad in unsafe.items() if is_bad]
+            try:
+                has_publish_token = bool(self.mac_mini_token())
+            except OSError as exc:
+                raise RuntimeError("production requires readable COPY_FACTORY_PUBLISH_TOKEN_FILE") from exc
+            if not has_publish_token:
+                bad.append("COPY_FACTORY_PUBLISH_TOKEN")
             if bad:
                 raise RuntimeError(f"production requires secure env vars: {', '.join(bad)}")
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -43,4 +51,11 @@ class Config:
             return self.export_token
         if self.export_token_file:
             return Path(self.export_token_file).read_text(encoding="utf-8").strip()
+        return ""
+
+    def mac_mini_token(self) -> str:
+        if self.publish_token:
+            return self.publish_token
+        if self.publish_token_file:
+            return Path(self.publish_token_file).read_text(encoding="utf-8").strip()
         return ""

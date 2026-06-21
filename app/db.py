@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +39,12 @@ def init_db(conn: sqlite3.Connection) -> None:
             edited_copy TEXT NOT NULL DEFAULT '',
             schedule_status TEXT NOT NULL DEFAULT 'unscheduled',
             scheduled_at TEXT NOT NULL DEFAULT '',
+            publish_status TEXT NOT NULL DEFAULT 'none',
+            publish_confirmed_at TEXT NOT NULL DEFAULT '',
+            publish_claimed_at TEXT NOT NULL DEFAULT '',
+            publish_claim_token TEXT NOT NULL DEFAULT '',
+            publish_result_at TEXT NOT NULL DEFAULT '',
+            publish_error TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -78,10 +85,25 @@ def ensure_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE source_items ADD COLUMN schedule_status TEXT NOT NULL DEFAULT 'unscheduled'")
     if "scheduled_at" not in columns:
         conn.execute("ALTER TABLE source_items ADD COLUMN scheduled_at TEXT NOT NULL DEFAULT ''")
+    for name in (
+        "publish_status",
+        "publish_confirmed_at",
+        "publish_claimed_at",
+        "publish_claim_token",
+        "publish_result_at",
+        "publish_error",
+    ):
+        if name not in columns:
+            default = "none" if name == "publish_status" else ""
+            conn.execute(f"ALTER TABLE source_items ADD COLUMN {name} TEXT NOT NULL DEFAULT '{default}'")
 
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def due_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def hash_text(text: str) -> str:
@@ -148,30 +170,144 @@ def save_generation(conn: sqlite3.Connection, item_id: int, copy: str, error: st
     conn.commit()
 
 
-def save_review(conn: sqlite3.Connection, item_id: int, edited_copy: str, status: str) -> None:
+def save_review(conn: sqlite3.Connection, item_id: int, edited_copy: str, status: str) -> bool:
     if status not in {"draft", "approved", "rejected"}:
         raise ValueError("status must be draft, approved, or rejected")
-    conn.execute(
-        "UPDATE source_items SET edited_copy = ?, review_status = ?, updated_at = ? WHERE id = ?",
-        (edited_copy, status, now(), item_id),
+    cur = conn.execute(
+        """
+        UPDATE source_items
+        SET edited_copy = ?, review_status = ?,
+            publish_status = CASE
+                WHEN ? != 'approved' THEN 'none'
+                WHEN publish_status IN ('confirmed', 'failed') THEN 'none'
+                ELSE publish_status
+            END,
+            publish_confirmed_at = CASE WHEN publish_status IN ('confirmed', 'failed') OR ? != 'approved' THEN '' ELSE publish_confirmed_at END,
+            publish_claimed_at = CASE WHEN publish_status IN ('confirmed', 'failed') OR ? != 'approved' THEN '' ELSE publish_claimed_at END,
+            publish_claim_token = CASE WHEN publish_status IN ('confirmed', 'failed') OR ? != 'approved' THEN '' ELSE publish_claim_token END,
+            publish_result_at = CASE WHEN publish_status IN ('confirmed', 'failed') OR ? != 'approved' THEN '' ELSE publish_result_at END,
+            publish_error = CASE WHEN publish_status IN ('confirmed', 'failed') OR ? != 'approved' THEN '' ELSE publish_error END,
+            updated_at = ?
+        WHERE id = ? AND publish_status NOT IN ('claimed', 'published')
+        """,
+        (edited_copy, status, status, status, status, status, status, status, now(), item_id),
     )
     conn.commit()
+    return int(cur.rowcount) == 1
 
 
-def save_schedule(conn: sqlite3.Connection, item_id: int, scheduled_at: str) -> None:
-    conn.execute(
-        "UPDATE source_items SET schedule_status = 'scheduled', scheduled_at = ?, updated_at = ? WHERE id = ?",
+def save_schedule(conn: sqlite3.Connection, item_id: int, scheduled_at: str) -> bool:
+    cur = conn.execute(
+        """
+        UPDATE source_items
+        SET schedule_status = 'scheduled', scheduled_at = ?, publish_status = 'none',
+            publish_confirmed_at = '', publish_claimed_at = '', publish_claim_token = '',
+            publish_result_at = '', publish_error = '', updated_at = ?
+        WHERE id = ? AND publish_status IN ('none', 'failed')
+        """,
         (scheduled_at, now(), item_id),
     )
     conn.commit()
+    return int(cur.rowcount) == 1
 
 
-def clear_schedule(conn: sqlite3.Connection, item_id: int) -> None:
-    conn.execute(
-        "UPDATE source_items SET schedule_status = 'unscheduled', scheduled_at = '', updated_at = ? WHERE id = ?",
+def clear_schedule(conn: sqlite3.Connection, item_id: int) -> bool:
+    cur = conn.execute(
+        """
+        UPDATE source_items
+        SET schedule_status = 'unscheduled', scheduled_at = '', publish_status = 'none',
+            publish_confirmed_at = '', publish_claimed_at = '', publish_claim_token = '',
+            publish_result_at = '', publish_error = '', updated_at = ?
+        WHERE id = ? AND publish_status IN ('none', 'failed')
+        """,
         (now(), item_id),
     )
     conn.commit()
+    return int(cur.rowcount) == 1
+
+
+def confirm_publish_plan(conn: sqlite3.Connection) -> int:
+    ts = now()
+    cur = conn.execute(
+        """
+        UPDATE source_items
+        SET publish_status = 'confirmed', publish_confirmed_at = ?, publish_error = '', updated_at = ?
+        WHERE review_status = 'approved'
+          AND schedule_status = 'scheduled'
+          AND scheduled_at != ''
+          AND publish_status IN ('none', 'failed')
+        """,
+        (ts, ts),
+    )
+    conn.commit()
+    return int(cur.rowcount)
+
+
+def publish_queue(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            """
+            SELECT * FROM source_items
+            WHERE publish_status IN ('confirmed', 'claimed', 'published', 'failed')
+            ORDER BY scheduled_at ASC, id ASC
+            """
+        )
+    )
+
+
+def claim_due(conn: sqlite3.Connection, due_at: str, limit: int = 1) -> list[tuple[sqlite3.Row, str]]:
+    limit = max(1, min(limit, 20))
+    ts = now()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        rows = list(
+            conn.execute(
+                """
+                SELECT * FROM source_items
+                WHERE publish_status = 'confirmed'
+                  AND schedule_status = 'scheduled'
+                  AND scheduled_at <= ?
+                ORDER BY scheduled_at ASC, id ASC
+                LIMIT ?
+                """,
+                (due_at, limit),
+            )
+        )
+        claimed = []
+        for row in rows:
+            token = secrets.token_urlsafe(24)
+            conn.execute(
+                """
+                UPDATE source_items
+                SET publish_status = 'claimed', publish_claimed_at = ?, publish_claim_token = ?, updated_at = ?
+                WHERE id = ? AND publish_status = 'confirmed'
+                """,
+                (ts, token, ts, row["id"]),
+            )
+            fresh = get_item(conn, int(row["id"]))
+            if fresh:
+                claimed.append((fresh, token))
+        conn.commit()
+        return claimed
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def save_publish_result(conn: sqlite3.Connection, item_id: int, claim_token: str, status: str, error: str = "") -> bool:
+    if status not in {"published", "failed"}:
+        raise ValueError("status must be published or failed")
+    ts = now()
+    cur = conn.execute(
+        """
+        UPDATE source_items
+        SET publish_status = ?, publish_result_at = ?, publish_error = ?, updated_at = ?
+        WHERE id = ? AND publish_status = 'claimed' AND publish_claim_token = ?
+        """,
+        (status, ts, error, ts, item_id, claim_token),
+    )
+    conn.commit()
+    return int(cur.rowcount) == 1
 
 
 def today_items(conn: sqlite3.Connection) -> list[sqlite3.Row]:

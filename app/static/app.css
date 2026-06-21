@@ -118,6 +118,7 @@ h2 { margin: 0; font-size: 18px; line-height: 1.2; }
 }
 .approved { color: #097245; background: #effcf6; border-color: #b9f2d4; }
 .rejected { color: #a71919; background: #fff1f1; border-color: #ffd0d0; }
+.publish { color: #7a4b00; background: #fff8e8; border-color: #f6d48a; }
 .copy { white-space: pre-wrap; line-height: 1.58; margin: 12px 0; }
 .media-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-width: 560px; }
 .media-tile {
@@ -196,6 +197,15 @@ select, input {
 .run-row { border-top: 1px solid var(--line); padding: 10px 0; }
 .timeline { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: calc(100vh - 82px); }
 .approved-pool { border-right: 1px solid var(--line); padding: 18px; }
+.confirm-bar {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 14px 18px;
+}
+.confirm-bar p { margin: 4px 0 0; }
 .slot-grid { padding: 18px; display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 12px; align-content: start; overflow-x: auto; }
 .slot {
   min-height: 220px;
@@ -224,6 +234,7 @@ select, input {
   .rail { display: none; }
   .stage { border-right: 0; }
   .editor, .timeline { display: block; }
+  .confirm-bar { align-items: stretch; flex-direction: column; }
   .source-pane { border-right: 0; }
   .sync-grid { display: block; padding: 14px; }
   .sync-grid .panel { margin-bottom: 14px; }
