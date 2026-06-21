@@ -58,7 +58,7 @@ Meaning:
 - `draft`: generated, waiting for human review.
 - `approved`: human accepted it for possible publishing.
 - `scheduled`: human assigned a target time.
-- `confirmed`: human clicked Confirm Publish Plan; Mac mini may claim it when due.
+- `confirmed`: human clicked Confirm Publish Plan; Mac mini may claim/export it.
 - `claimed`: Mac mini has locked the task.
 - `published`: Mac mini reported success.
 - `failed`: Mac mini reported failure; human can edit/reschedule/reconfirm.
@@ -79,7 +79,7 @@ Read queue:
 GET /api/publish/queue
 ```
 
-Claim due tasks:
+Claim confirmed scheduled tasks:
 
 ```http
 POST /api/publish/claim_due
@@ -88,7 +88,7 @@ Content-Type: application/json
 {"limit":1}
 ```
 
-The VPS uses its own UTC clock. Mac mini should not decide due-ness itself.
+The response includes `scheduled_at`. The Mac mini publisher uses that field to decide when to post.
 
 Claim response task shape:
 
@@ -127,15 +127,13 @@ Failure:
 
 ## Deployment
 
-VPS needs one web process and one scheduler:
+VPS can run as one Docker container:
 
 ```bash
-python3 -m app.web --host 0.0.0.0 --port 8000
+docker compose up -d
 ```
 
-```cron
-*/30 * * * * cd /app && /usr/local/bin/python3 scripts/sync_once.py >> /var/log/copy-factory-sync.log 2>&1
-```
+`docker-compose.yml` starts `scripts/serve_with_sync.py`, which serves the website and runs upstream sync every 30 minutes.
 
 Production secrets:
 

@@ -1,0 +1,23 @@
+services:
+  copy-factory:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      COPY_FACTORY_ENV: production
+      COPY_FACTORY_DB: /app/data/copy_factory.sqlite3
+      COPY_FACTORY_USER: ${COPY_FACTORY_USER}
+      COPY_FACTORY_PASSWORD: ${COPY_FACTORY_PASSWORD}
+      COPY_FACTORY_SESSION_SECRET: ${COPY_FACTORY_SESSION_SECRET}
+      COPY_FACTORY_PUBLISH_TOKEN: ${COPY_FACTORY_PUBLISH_TOKEN}
+      COPY_FACTORY_SOURCES: xueqiu,reddit
+      NEWS_HARNESS_EXPORT_TOKEN: ${NEWS_HARNESS_EXPORT_TOKEN}
+      NEWS_HARNESS_EXPORT_LIMIT: ${NEWS_HARNESS_EXPORT_LIMIT:-500}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      COPY_FACTORY_SYNC_INTERVAL_SECONDS: ${COPY_FACTORY_SYNC_INTERVAL_SECONDS:-1800}
+    volumes:
+      - copy-factory-data:/app/data
+
+volumes:
+  copy-factory-data:

@@ -17,21 +17,20 @@ make sync
 make run
 ```
 
-Open `http://127.0.0.1:8000` and log in with `admin / password`. The app has four main work areas:
+Open `http://127.0.0.1:8000` and log in with `admin / password`. The app has three main work areas:
 
 - Review: Twitter-like feed for generated copy, source text, and media references.
 - Daily workbench: synced items are grouped by work date, with Today / Yesterday / All filters so skipped drafts stay available without cluttering the next morning.
-- Sync: preview latest snapshot count before running generation.
+- Sync: automatic status plus a manual "sync now" action.
 - Schedule: drag approved copy into time slots, then confirm the publish plan.
-- Settings: runtime credential and deployment status.
 
 Morning flow:
 
 1. Open the site and run sync if the scheduler has not already pulled the latest snapshot.
 2. Review generated drafts, edit today's copy, and save approved items.
 3. Drag approved items into time slots on Schedule. The browser stores UTC ISO timestamps and displays them in local time.
-4. Click "确认发布计划". The server marks due work as confirmed queue tasks.
-5. Stop there for the local morning workflow. The future Mac mini publisher starts from the confirmed queue later.
+4. Click "确认发布计划". The server marks scheduled approved work as confirmed queue tasks.
+5. Stop there for the local morning workflow. The Mac mini publisher claims confirmed tasks later and uses `scheduled_at` to decide when to post.
 
 Local smoke for that exact workflow:
 
@@ -133,6 +132,14 @@ Keep tokens in environment variables or secret files, never in code.
 
 ## Deployment
 
+Hostinger compose path:
+
+```text
+docker-compose.yml
+```
+
+The container starts the authenticated website and a built-in 30-minute sync loop.
+
 Docker:
 
 ```bash
@@ -148,10 +155,10 @@ docker run --rm -p 8000:8000 \
   copy-factory
 ```
 
-Platform scheduler:
+Single-container production:
 
-- Run the web process with `python3 -m app.web --host 0.0.0.0 --port 8000`.
-- Run `python3 scripts/sync_once.py` every 30 minutes.
+- Run the compose service from `docker-compose.yml`.
+- It starts `scripts/serve_with_sync.py`, which serves the website and runs `run_sync` every 30 minutes.
 - Put DeepSeek, source, and Mac mini publish API credentials in platform secrets.
 - Put the site behind HTTPS and basic platform firewall rules; the app itself is single-user session login, not a team permission system.
 
@@ -183,7 +190,7 @@ The browser app is served by `app.web` and talks to JSON endpoints:
 - `POST /api/items/:id/unschedule`
 - `POST /api/publish/confirm_plan` browser session only; confirms approved and scheduled items.
 - `GET /api/publish/queue` browser session or `Authorization: Bearer <COPY_FACTORY_PUBLISH_TOKEN>`; lists confirmed/claimed/published/failed tasks.
-- `POST /api/publish/claim_due` bearer token or browser session; body `{"limit":1}`; the server uses its own UTC clock, atomically marks due confirmed tasks as `claimed`, and returns `claim_token`.
+- `POST /api/publish/claim_due` bearer token or browser session; body `{"limit":1}`; atomically marks confirmed scheduled tasks as `claimed`, and returns `claim_token`.
 - `POST /api/publish/result` bearer token or browser session; body `{"item_id":1,"claim_token":"...","status":"published"}` or `{"item_id":1,"claim_token":"...","status":"failed","error":"..."}`.
 
 Publish state flow:
@@ -205,7 +212,7 @@ Confirmed or failed items can be edited and then reconfirmed. Claimed or publish
 - Raw text, source, URL, media references, sync batch, generation status, and errors.
 - Huajiao writer bridge with fake local writer or DeepSeek script. Chinese sources such as Xueqiu are rewritten in Chinese directly; English sources such as Reddit are first localized into Chinese investment context before draft generation.
 - Review pool with edit and `draft` / `approved` / `rejected` save.
-- Sync preview/run console with recent batch history.
+- Sync status with manual run feedback and recent batch history.
 - Drag schedule timeline for approved copy.
 - Confirmed server publish queue with atomic due-task claiming and result writeback.
 

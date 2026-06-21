@@ -273,7 +273,7 @@ def publish_queue(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     )
 
 
-def claim_due(conn: sqlite3.Connection, due_at: str, limit: int = 1) -> list[tuple[sqlite3.Row, str]]:
+def claim_due(conn: sqlite3.Connection, due_at: str = "", limit: int = 1) -> list[tuple[sqlite3.Row, str]]:
     limit = max(1, min(limit, 20))
     ts = now()
     conn.execute("BEGIN IMMEDIATE")
@@ -284,11 +284,10 @@ def claim_due(conn: sqlite3.Connection, due_at: str, limit: int = 1) -> list[tup
                 SELECT * FROM source_items
                 WHERE publish_status = 'confirmed'
                   AND schedule_status = 'scheduled'
-                  AND scheduled_at <= ?
                 ORDER BY scheduled_at ASC, id ASC
                 LIMIT ?
                 """,
-                (due_at, limit),
+                (limit,),
             )
         )
         claimed = []

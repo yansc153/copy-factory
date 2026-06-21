@@ -8,4 +8,4 @@ RUN mkdir -p data
 
 ENV COPY_FACTORY_ENV=production
 EXPOSE 8000
-CMD ["python3", "-m", "app.web", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python3", "scripts/serve_with_sync.py", "--host", "0.0.0.0", "--port", "8000"]

@@ -17,7 +17,9 @@ test:
 
 build: install lint typecheck test
 	mkdir -p dist
-	cp README.md env.example Dockerfile dist/
+	cp README.md env.example Dockerfile docker-compose.yml dist/
+	mkdir -p dist/scripts
+	cp scripts/serve_with_sync.py dist/scripts/
 
 run:
 	$(PYTHON) -m app.web --host 127.0.0.1 --port 8000

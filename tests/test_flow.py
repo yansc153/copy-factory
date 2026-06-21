@@ -135,7 +135,8 @@ class CopyFactoryFlowTest(unittest.TestCase):
             conn.request("POST", "/api/publish/claim_due", claim_body, worker_headers)
             failed_claim = conn.getresponse()
             failed_tasks = json.loads(failed_claim.read().decode())["tasks"]
-            self.assertEqual(len(failed_tasks), 1)
+            self.assertEqual(len(failed_tasks), 2)
+            self.assertIn("2999-01-01T00:00:00.000Z", [task["scheduled_at"] for task in failed_tasks])
             failed_task = failed_tasks[0]
             result_body = json.dumps(
                 {
