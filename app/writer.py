@@ -62,15 +62,16 @@ def deepseek_writer(item: dict[str, object]) -> str:
         src.write_text(source_text, encoding="utf-8")
         env = os.environ.copy()
         env["VOICE_OUTPUT_MODE"] = "long-social"
-        result = subprocess.run(["python3", HUAJIAO_SCRIPT, str(src), str(out)], env=env, capture_output=True, text=True)
+        timeout = int(os.getenv("DEEPSEEK_WRITER_TIMEOUT_SECONDS", "90"))
+        result = subprocess.run(["python3", HUAJIAO_SCRIPT, str(src), str(out)], env=env, capture_output=True, text=True, timeout=timeout)
         if result.returncode:
             raise RuntimeError((result.stderr or result.stdout or "DeepSeek writer failed")[-800:])
         return out.read_text(encoding="utf-8")
 
 
-def generate_copy(item: dict[str, object], config: Config) -> str:
+def generate_copy(item: dict[str, object], config: Config) -> tuple[str, str]:
     if has_deepseek_key():
-        return deepseek_writer(item)
+        return deepseek_writer(item), "deepseek"
     if config.is_production:
         raise RuntimeError("production generation requires DEEPSEEK_API_KEY or DEEPSEEK_API_KEY_FILE")
-    return fake_writer(item)
+    return fake_writer(item), "local"

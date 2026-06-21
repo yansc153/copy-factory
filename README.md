@@ -61,6 +61,14 @@ DEEPSEEK_API_KEY_FILE=/run/secrets/deepseek_api_key make deepseek-smoke
 
 This uses the real writer bridge on an English Reddit-style source and checks that the final review copy is Chinese, non-empty, and does not keep raw English source sentences. It exits clearly if neither `DEEPSEEK_API_KEY` nor `DEEPSEEK_API_KEY_FILE` is configured.
 
+Regenerate existing drafts through the same Huajiao + DeepSeek path:
+
+```bash
+DEEPSEEK_API_KEY_FILE=/run/secrets/deepseek_api_key make regenerate-deepseek
+```
+
+By default this only rewrites draft, unpublished rows. Use `scripts/regenerate_deepseek.py --include-approved` only when changed approved copy should return to draft for review.
+
 ## 30-Minute Sync
 
 Any scheduler can call:

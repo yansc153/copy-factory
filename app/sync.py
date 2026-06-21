@@ -147,8 +147,8 @@ def process_items(conn, config: Config, batch: str, result: SyncResult, items: l
             continue
         result.inserted += 1
         try:
-            copy = writer.generate_copy(item, config)
-            db.save_generation(conn, item_id, copy)
+            copy, status = writer.generate_copy(item, config)
+            db.save_generation(conn, item_id, copy, status=status)
             result.generated += 1
         except Exception as exc:
             db.save_generation(conn, item_id, "", str(exc))

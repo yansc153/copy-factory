@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test build run sync morning-smoke deepseek-smoke
+.PHONY: install lint typecheck test build run sync regenerate-deepseek morning-smoke deepseek-smoke
 
 PYTHON ?= python3
 
@@ -24,6 +24,9 @@ run:
 
 sync:
 	$(PYTHON) scripts/sync_once.py
+
+regenerate-deepseek:
+	$(PYTHON) scripts/regenerate_deepseek.py
 
 morning-smoke:
 	$(PYTHON) scripts/morning_smoke.py

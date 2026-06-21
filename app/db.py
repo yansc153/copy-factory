@@ -171,13 +171,15 @@ def insert_source_item(conn: sqlite3.Connection, item: dict[str, Any], sync_batc
     return int(cur.lastrowid), True
 
 
-def save_generation(conn: sqlite3.Connection, item_id: int, copy: str, error: str = "") -> None:
-    status = "error" if error else "generated"
+def save_generation(conn: sqlite3.Connection, item_id: int, copy: str, error: str = "", status: str = "generated") -> None:
+    status = "error" if error else status
     conn.execute(
         """
         UPDATE source_items
         SET generation_status = ?, generation_error = ?, generated_copy = ?, edited_copy = ?,
-            review_status = 'draft', updated_at = ?
+            review_status = 'draft', schedule_status = 'unscheduled', scheduled_at = '',
+            publish_status = 'none', publish_confirmed_at = '', publish_claimed_at = '',
+            publish_claim_token = '', publish_result_at = '', publish_error = '', updated_at = ?
         WHERE id = ?
         """,
         (status, error, copy, copy, now(), item_id),

@@ -199,6 +199,22 @@ class CopyFactoryFlowTest(unittest.TestCase):
         self.assertNotIn("Investors debate", copy)
         self.assertNotIn("A thread on large-cap tech", copy)
 
+    def test_reddit_uses_deepseek_writer_when_key_exists(self) -> None:
+        old_key = os.environ.get("DEEPSEEK_API_KEY")
+        old_deepseek = writer.deepseek_writer
+        try:
+            os.environ["DEEPSEEK_API_KEY"] = "sk-test"
+            writer.deepseek_writer = lambda item: f"deepseek中文稿：{item['source']}"
+            copy, status = writer.generate_copy(adapters.mock_reddit()[0], self.config)
+        finally:
+            writer.deepseek_writer = old_deepseek
+            if old_key is None:
+                os.environ.pop("DEEPSEEK_API_KEY", None)
+            else:
+                os.environ["DEEPSEEK_API_KEY"] = old_key
+        self.assertEqual(status, "deepseek")
+        self.assertIn("deepseek中文稿：mock-reddit", copy)
+
     def test_deepseek_smoke_requires_real_key_without_traceback(self) -> None:
         env = os.environ.copy()
         env.pop("DEEPSEEK_API_KEY", None)
