@@ -2,8 +2,14 @@ services:
   copy-factory:
     build: .
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.copy-factory.rule=Host(`hardness-content.hellopepper.work`)
+      - traefik.http.routers.copy-factory.entrypoints=websecure
+      - traefik.http.routers.copy-factory.tls.certresolver=letsencrypt
+      - traefik.http.services.copy-factory.loadbalancer.server.port=8000
     environment:
       COPY_FACTORY_ENV: production
       COPY_FACTORY_DB: /app/data/copy_factory.sqlite3
@@ -18,6 +24,13 @@ services:
       COPY_FACTORY_SYNC_INTERVAL_SECONDS: ${COPY_FACTORY_SYNC_INTERVAL_SECONDS:-1800}
     volumes:
       - copy-factory-data:/app/data
+    networks:
+      - default
+      - traefik-proxy
 
 volumes:
   copy-factory-data:
+
+networks:
+  traefik-proxy:
+    external: true

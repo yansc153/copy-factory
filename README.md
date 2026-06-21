@@ -138,7 +138,13 @@ Hostinger compose path:
 docker-compose.yml
 ```
 
-The container starts the authenticated website and a built-in 30-minute sync loop.
+Production URL:
+
+```text
+https://hardness-content.hellopepper.work
+```
+
+The compose file is ready for Hostinger Docker Manager with the built-in Traefik project. It joins the external `traefik-proxy` network, routes `hardness-content.hellopepper.work`, and lets Traefik handle HTTPS certificates through Let's Encrypt. The container starts the authenticated website and a built-in 30-minute sync loop.
 
 Docker:
 
@@ -159,8 +165,9 @@ Single-container production:
 
 - Run the compose service from `docker-compose.yml`.
 - It starts `scripts/serve_with_sync.py`, which serves the website and runs `run_sync` every 30 minutes.
+- Point `hardness-content.hellopepper.work` to the VPS IP before relying on Traefik HTTPS.
 - Put DeepSeek, source, and Mac mini publish API credentials in platform secrets.
-- Put the site behind HTTPS and basic platform firewall rules; the app itself is single-user session login, not a team permission system.
+- Keep the site behind HTTPS and basic platform firewall rules; the app itself is single-user session login, not a team permission system.
 
 VPS responsibilities:
 

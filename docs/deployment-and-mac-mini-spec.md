@@ -133,7 +133,7 @@ VPS can run as one Docker container:
 docker compose up -d
 ```
 
-`docker-compose.yml` starts `scripts/serve_with_sync.py`, which serves the website and runs upstream sync every 30 minutes.
+`docker-compose.yml` starts `scripts/serve_with_sync.py`, which serves the website and runs upstream sync every 30 minutes. On Hostinger, the service joins the external `traefik-proxy` network and is routed through Traefik at `https://hardness-content.hellopepper.work`; Traefik handles HTTPS certificates automatically after DNS points the hostname to the VPS IP.
 
 Production secrets:
 
