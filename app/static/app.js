@@ -60,13 +60,17 @@ async function load() {
 }
 
 function shell(content, side = "") {
-  const nav = ["review:审核", "sync:同步", "schedule:排期", "settings:设置"].map((item) => {
+  const topNav = ["review:内容审核", "schedule:发布排期", "sync:数据中心", "settings:设置"].map((item) => {
+    const [view, label] = item.split(":");
+    return `<button class="${state.view === view ? "active" : ""}" onclick="go('${view}')">${label}</button>`;
+  }).join("");
+  const nav = ["review:审核工作台", "schedule:发布排期", "sync:同步中心", "settings:规则设置"].map((item) => {
     const [view, label] = item.split(":");
     return `<button class="${state.view === view ? "active" : ""}" onclick="go('${view}')"><span>${label}</span></button>`;
   }).join("");
   return `
-    <aside class="nav"><div class="mark">CF</div><p class="nav-note">Morning desk</p>${nav}<button class="run" onclick="go('sync')">运行批次</button></aside>
-    <main class="main ${side ? "" : "no-rail"}"><section class="stage">${content}</section><aside class="rail">${side}</aside></main>
+    <aside class="nav"><div class="brand"><div class="mark">CF</div><strong>Copy Factory</strong></div>${nav}<div class="nav-card"><strong>数据同步正常</strong><p>每 30 分钟自动同步</p><button onclick="go('sync')">立即同步</button></div></aside>
+    <main class="workspace"><header class="appbar"><nav>${topNav}</nav><div class="search">搜索内容、来源或标签...</div><div class="user-dot">J</div></header><div class="main ${side ? "" : "no-rail"}"><section class="stage">${content}</section><aside class="rail">${side}</aside></div></main>
     <nav class="tabbar">${nav}</nav>
   `;
 }
@@ -102,11 +106,11 @@ function itemCard(item, compact = false, context = "") {
   const scheduled = item.scheduled_at ? formatSlot(item.scheduled_at) : "";
   const sourceLabel = item.source.includes("xueqiu") ? "雪球" : item.source;
   return `<article class="${compact ? "mini-card" : "feed-item"}" draggable="${canMove(item)}" ondragstart="dragItem(event, ${item.id})">
-    ${compact ? "" : `<div class="avatar">${h(sourceLabel[0]?.toUpperCase() || "C")}</div>`}
+    ${compact ? "" : `<div class="avatar ${item.source.includes("xueqiu") ? "xueqiu" : "reddit"}">${h(sourceLabel[0]?.toUpperCase() || "C")}</div>`}
     <div class="item-body">
       <div class="item-head">
+        <span class="source-line">${h(sourceLabel)} ${item.published_at ? "· " + h(item.published_at.slice(0, 16).replace("T", " ")) : ""}</span>
         <span class="item-title">${h(item.title || "Untitled")}</span>
-        <span class="muted">· ${h(sourceLabel)}</span>
         <span class="pill ${item.review_status}">${item.review_status}</span>
         <span class="pill">${item.generation_status}</span>
         ${item.schedule_status === "scheduled" ? `<span class="pill approved">${h(scheduled)}</span>` : ""}
@@ -126,8 +130,10 @@ function itemCard(item, compact = false, context = "") {
 }
 
 function reviewView() {
-  const side = `<div class="panel"><h2>队列概览</h2>${Object.entries(counts()).map(([k,v]) => `<div class="kv"><span>${k}</span><strong>${v}</strong></div>`).join("")}</div>
-    <div class="panel soft"><h2>运行规则</h2><p class="muted">先看 health.generated_at，变了才拉 export。入库按 source_id / url / hash 去重。</p></div>`;
+  const c = counts();
+  const side = `<div class="panel"><h2>队列概览</h2><div class="queue-total"><strong>${c.all}</strong><span>全部内容</span></div>${Object.entries(c).filter(([k]) => k !== "all").map(([k,v]) => `<div class="kv"><span>${k}</span><strong>${v}</strong></div>`).join("")}</div>
+    <div class="panel soft"><h2>同步健康</h2><div class="kv"><span>状态</span><strong class="ok">正常</strong></div><p class="muted">最新 feed 按 generated_at 判断，只处理新增快照。</p></div>
+    <div class="panel"><h2>快捷操作</h2><button class="rail-action" onclick="go('sync')">刷新列表</button><button class="rail-action" onclick="go('schedule')">打开排期</button></div>`;
   const items = state.items.map((item) => itemCard(item)).join("") || `<p class="panel">暂无文案。去同步页运行一个批次。</p>`;
   return shell(`<div class="topbar"><p class="eyebrow">Copy Factory</p><h1>内容审核工作台</h1><p class="muted">每天同步进来的内容按日期分开；昨天没选上的会保留在昨天或全部里。</p>${statBar()}</div><div class="feed-list">${items}</div>`, side);
 }
@@ -140,10 +146,11 @@ function editorView() {
     const checked = selectedMedia(item) === url ? "checked" : "";
     return `<label><input type="radio" name="selected-media" value="${h(url)}" ${checked}><img src="${h(url)}" alt="候选配图 ${i + 1}"><span>图片 ${i + 1}</span></label>`;
   }).join("")}</div>` : `<p class="muted">这条来源没有图片。</p>`;
-  return shell(`<div class="topbar"><button class="small-btn" onclick="go('review')">返回审核池</button></div>
+  return shell(`<div class="topbar editor-title"><button class="small-btn" onclick="go('review')">返回列表</button><h1>编辑文案</h1><span class="pill ${item.review_status}">${item.review_status}</span></div>
     <div class="editor">
       <section class="source-pane"><h1>${h(item.title)}</h1><p class="muted">${h(item.source)} · ${h(item.published_at)} · <a href="${h(item.url)}" target="_blank">原文链接</a></p><h2>原文</h2><pre>${h(item.text)}</pre><h2>图片引用</h2>${mediaGrid(item)}</section>
       <section class="edit-pane"><h2>生成文案</h2><textarea id="copy">${h(item.edited_copy || item.generated_copy)}</textarea><h2>选择配图</h2>${mediaChoices}<div class="form-grid"><button class="wide-btn" onclick="saveReview(${item.id}, 'draft')">保存草稿</button><button class="wide-btn" onclick="saveReview(${item.id}, 'approved')">批准</button><button class="small-btn danger" onclick="saveReview(${item.id}, 'rejected')">拒绝</button><button class="small-btn" onclick="go('schedule')">去排期</button></div><p class="muted">生成状态：${h(item.generation_status)} ${h(item.generation_error || "")}</p></section>
+      <section class="preview-pane"><h2>预览</h2><div class="post-preview"><div class="preview-avatar">CF</div><strong>Copy Factory</strong><p>${h(item.edited_copy || item.generated_copy)}</p>${selectedMedia(item) ? `<img src="${h(selectedMedia(item))}" alt="预览配图">` : ""}</div><label>发布时间<input value="${h(formatSlot(item.scheduled_at || nextSlots()[0]))}" disabled></label></section>
     </div>`);
 }
 
