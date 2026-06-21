@@ -223,7 +223,7 @@ class CopyFactoryFlowTest(unittest.TestCase):
         conn.close()
 
     def test_real_export_uses_health_generated_at_gate(self) -> None:
-        calls = {"export": 0}
+        calls = {"export": []}
         old_health = adapters.fetch_health
         old_export = adapters.fetch_export
 
@@ -231,18 +231,43 @@ class CopyFactoryFlowTest(unittest.TestCase):
             return {"generated_at": "2026-06-20T13:27:07Z"}
 
         def fake_export(config, sources, limit=500):
-            calls["export"] += 1
-            self.assertEqual(sources, ["xueqiu", "reddit"])
+            calls["export"].append(tuple(sources))
+            if sources == ["xueqiu"]:
+                return [
+                    {
+                        "source": "xueqiu_hot",
+                        "source_id": "xq-real-1",
+                        "url": "https://xueqiu.example/real/1",
+                        "title": "真实快照标题",
+                        "text": "真实快照正文",
+                        "author": "",
+                        "published_at": "2026-06-20T13:00:00Z",
+                        "media_urls": ["https://xueqiu.example/img.png"],
+                    }
+                ]
+            if sources == ["reddit"]:
+                return [
+                    {
+                        "source": "reddit",
+                        "source_id": "rd-real-1",
+                        "url": "https://reddit.example/real/1",
+                        "title": "Real reddit title",
+                        "text": "Real reddit text",
+                        "author": "",
+                        "published_at": "2026-06-20T13:00:00Z",
+                        "media_urls": [],
+                    }
+                ]
             return [
                 {
-                    "source": "xueqiu_hot",
-                    "source_id": "xq-real-1",
-                    "url": "https://xueqiu.example/real/1",
-                    "title": "真实快照标题",
-                    "text": "真实快照正文",
+                    "source": "reddit",
+                    "source_id": "combined-starved",
+                    "url": "https://reddit.example/starved",
+                    "title": "combined should not be used",
+                    "text": "combined should not be used",
                     "author": "",
                     "published_at": "2026-06-20T13:00:00Z",
-                    "media_urls": ["https://xueqiu.example/img.png"],
+                    "media_urls": [],
                 }
             ]
 
@@ -256,10 +281,10 @@ class CopyFactoryFlowTest(unittest.TestCase):
             adapters.fetch_health = old_health
             adapters.fetch_export = old_export
 
-        self.assertEqual(first.inserted, 1)
+        self.assertEqual(first.inserted, 2)
         self.assertFalse(first.skipped)
         self.assertTrue(second.skipped)
-        self.assertEqual(calls["export"], 1)
+        self.assertEqual(calls["export"], [("xueqiu",), ("reddit",)])
 
     def test_preview_does_not_pull_export_when_health_is_unchanged(self) -> None:
         calls = {"export": 0}
@@ -287,7 +312,7 @@ class CopyFactoryFlowTest(unittest.TestCase):
 
         self.assertEqual(first.inserted, 0)
         self.assertTrue(preview.skipped)
-        self.assertEqual(calls["export"], 1)
+        self.assertEqual(calls["export"], 2)
 
     def test_real_export_filters_by_import_window_before_generation(self) -> None:
         old_health = adapters.fetch_health

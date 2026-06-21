@@ -35,17 +35,21 @@ def run_sync(config: Config) -> SyncResult:
             try:
                 health = adapters.fetch_health(config)
                 generated_at = str(health.get("generated_at", ""))
-                state_key = "news_harness_generated_at:" + ",".join(sorted(real_sources))
-                if generated_at and generated_at == db.get_state(conn, state_key):
-                    result.skipped = True
-                else:
-                    items = adapters.fetch_export(config, real_sources, limit=config.export_limit)
-                    result.fetched += len(items)
+                skipped = 0
+                for source in real_sources:
+                    state_key = f"news_harness_generated_at:{source}"
+                    if generated_at and generated_at == db.get_state(conn, state_key):
+                        skipped += 1
+                        continue
+                    items = adapters.fetch_export(config, [source], limit=config.export_limit)
+                    fetched = len(items)
+                    result.fetched += fetched
                     items = filter_by_window(items, config)
-                    result.filtered += result.fetched - len(items)
+                    result.filtered += fetched - len(items)
                     process_items(conn, config, batch, result, items)
                     if generated_at:
                         db.set_state(conn, state_key, generated_at)
+                result.skipped = skipped == len(real_sources)
             except Exception as exc:
                 result.errors.append(f"news-harness: {exc}")
 
@@ -75,20 +79,23 @@ def preview_sync(config: Config) -> SyncResult:
             return result
         health = adapters.fetch_health(config)
         generated_at = str(health.get("generated_at", ""))
-        state_key = "news_harness_generated_at:" + ",".join(sorted(real_sources))
-        if generated_at and generated_at == db.get_state(conn, state_key):
-            result.skipped = True
-            db.record_sync_run(conn, "preview", result)
-            return result
-        items = adapters.fetch_export(config, real_sources, limit=config.export_limit)
-        result.fetched = len(items)
-        items = filter_by_window(items, config)
-        result.filtered = result.fetched - len(items)
-        for item in items:
-            if db.existing_item_id(conn, item):
-                result.duplicates += 1
-            else:
-                result.inserted += 1
+        skipped = 0
+        for source in real_sources:
+            state_key = f"news_harness_generated_at:{source}"
+            if generated_at and generated_at == db.get_state(conn, state_key):
+                skipped += 1
+                continue
+            items = adapters.fetch_export(config, [source], limit=config.export_limit)
+            fetched = len(items)
+            result.fetched += fetched
+            items = filter_by_window(items, config)
+            result.filtered += fetched - len(items)
+            for item in items:
+                if db.existing_item_id(conn, item):
+                    result.duplicates += 1
+                else:
+                    result.inserted += 1
+        result.skipped = skipped == len(real_sources)
         db.record_sync_run(conn, "preview", result)
         return result
     except Exception as exc:
