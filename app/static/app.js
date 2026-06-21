@@ -62,10 +62,10 @@ async function load() {
 function shell(content, side = "") {
   const nav = ["review:审核", "sync:同步", "schedule:排期", "settings:设置"].map((item) => {
     const [view, label] = item.split(":");
-    return `<button class="${state.view === view ? "active" : ""}" onclick="go('${view}')">${label}</button>`;
+    return `<button class="${state.view === view ? "active" : ""}" onclick="go('${view}')"><span>${label}</span></button>`;
   }).join("");
   return `
-    <aside class="nav"><div class="mark">CF</div>${nav}<button class="run" onclick="go('sync')">运行批次</button></aside>
+    <aside class="nav"><div class="mark">CF</div><p class="nav-note">Morning desk</p>${nav}<button class="run" onclick="go('sync')">运行批次</button></aside>
     <main class="main ${side ? "" : "no-rail"}"><section class="stage">${content}</section><aside class="rail">${side}</aside></main>
     <nav class="tabbar">${nav}</nav>
   `;
@@ -100,12 +100,13 @@ function mediaGrid(item) {
 function itemCard(item, compact = false, context = "") {
   const copy = (item.edited_copy || item.generated_copy || item.text || "").slice(0, compact ? 90 : 280);
   const scheduled = item.scheduled_at ? formatSlot(item.scheduled_at) : "";
+  const sourceLabel = item.source.includes("xueqiu") ? "雪球" : item.source;
   return `<article class="${compact ? "mini-card" : "feed-item"}" draggable="${canMove(item)}" ondragstart="dragItem(event, ${item.id})">
-    ${compact ? "" : `<div class="avatar">${h(item.source[0]?.toUpperCase() || "C")}</div>`}
-    <div>
+    ${compact ? "" : `<div class="avatar">${h(sourceLabel[0]?.toUpperCase() || "C")}</div>`}
+    <div class="item-body">
       <div class="item-head">
         <span class="item-title">${h(item.title || "Untitled")}</span>
-        <span class="muted">· ${h(item.source)}</span>
+        <span class="muted">· ${h(sourceLabel)}</span>
         <span class="pill ${item.review_status}">${item.review_status}</span>
         <span class="pill">${item.generation_status}</span>
         ${item.schedule_status === "scheduled" ? `<span class="pill approved">${h(scheduled)}</span>` : ""}
@@ -128,7 +129,7 @@ function reviewView() {
   const side = `<div class="panel"><h2>队列概览</h2>${Object.entries(counts()).map(([k,v]) => `<div class="kv"><span>${k}</span><strong>${v}</strong></div>`).join("")}</div>
     <div class="panel soft"><h2>运行规则</h2><p class="muted">先看 health.generated_at，变了才拉 export。入库按 source_id / url / hash 去重。</p></div>`;
   const items = state.items.map((item) => itemCard(item)).join("") || `<p class="panel">暂无文案。去同步页运行一个批次。</p>`;
-  return shell(`<div class="topbar"><h1>内容审核工作台</h1><p class="muted">每天同步进来的内容按日期分开；昨天没选上的会保留在昨天或全部里。</p>${statBar()}</div>${items}`, side);
+  return shell(`<div class="topbar"><p class="eyebrow">Copy Factory</p><h1>内容审核工作台</h1><p class="muted">每天同步进来的内容按日期分开；昨天没选上的会保留在昨天或全部里。</p>${statBar()}</div><div class="feed-list">${items}</div>`, side);
 }
 
 function editorView() {
@@ -165,7 +166,7 @@ function resultBlock(r) {
 function scheduleView() {
   const approved = state.items.filter((x) => x.review_status === "approved" && x.schedule_status !== "scheduled");
   const slots = nextSlots();
-  return shell(`<div class="topbar"><h1>拖拽排期时间线</h1><p class="muted">把 approved 文案拖到时间槽，再确认发布计划；确认后 server 队列等待 Mac mini 到点领取。</p>${statBar()}</div>
+  return shell(`<div class="topbar"><p class="eyebrow">Publish desk</p><h1>拖拽排期时间线</h1><p class="muted">把 approved 文案拖到时间槽，再确认发布计划；确认后 server 队列等待 Mac mini 到点领取。</p>${statBar()}</div>
     <div class="timeline"><aside class="approved-pool"><h2>可排期</h2>${approved.map((x) => itemCard(x, true, "pool")).join("") || `<p class="muted">没有未排期 approved 文案。</p>`}</aside><section><div class="confirm-bar"><div><strong>${scheduledReady()} 条可确认</strong><p class="muted">当前队列 ${state.publishQueue.length} 条，confirmed ${state.publishQueue.filter((x) => x.status === "confirmed").length} 条。</p></div><button class="primary" onclick="confirmPublishPlan()">确认发布计划</button></div><div class="slot-grid">${slots.map(slotView).join("")}</div></section></div>`);
 }
 
