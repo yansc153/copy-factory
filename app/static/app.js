@@ -1,3 +1,5 @@
+const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
+const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 const state = {
   view: "review",
   items: [],
@@ -11,8 +13,6 @@ const state = {
   syncError: "",
 };
 let syncTimer = 0;
-const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
-const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 
 const $ = (sel) => document.querySelector(sel);
 function h(value) {
