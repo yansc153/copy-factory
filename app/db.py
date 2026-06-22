@@ -117,7 +117,7 @@ def now() -> str:
 
 
 def work_today() -> str:
-    return date.today().isoformat()
+    return datetime.now(SHANGHAI).date().isoformat()
 
 
 def parse_item_time(value: str) -> datetime | None:

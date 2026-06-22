@@ -241,6 +241,12 @@ class CopyFactoryFlowTest(unittest.TestCase):
         self.assertEqual(len(db.items_for_work_date(conn, "")), 3)
         conn.close()
 
+    def test_work_today_uses_shanghai_timezone(self) -> None:
+        # ponytail: stable today-date without changing behavior
+        from datetime import datetime
+
+        self.assertEqual(db.work_today(), datetime.now(db.SHANGHAI).date().isoformat())
+
     def test_work_date_uses_observed_at_before_published_at(self) -> None:
         conn = db.connect(f"{self.tmp.name}/observed.sqlite3")
         db.init_db(conn)
