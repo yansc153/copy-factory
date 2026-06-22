@@ -134,11 +134,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
 .main.no-rail .rail { display: none; }
 .stage { border-right: 1px solid var(--line); min-height: 100vh; }
 .topbar {
-  position: sticky;
-  top: 66px;
+  position: static;
   z-index: 2;
   background: rgba(248,251,255,.94);
-  backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--line);
   padding: 28px 36px 22px;
 }
@@ -656,7 +654,7 @@ select, input {
   .media-choice { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .feed-item { margin: 12px 12px; grid-template-columns: 1fr; }
   .avatar { display: none; }
-  .topbar { top: 58px; padding: 18px 14px; }
+  .topbar { padding: 18px 14px; }
   h1 { font-size: 26px; }
   .slot-grid { grid-template-columns: 1fr; overflow: visible; padding: 14px; }
   .approved-pool { border-right: 0; border-bottom: 1px solid var(--line); }

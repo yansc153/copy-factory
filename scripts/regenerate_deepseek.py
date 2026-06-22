@@ -17,6 +17,8 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--include-approved", action="store_true")
     parser.add_argument("--only-error", action="store_true")
+    parser.add_argument("--force", action="store_true", help="Regenerate drafts even if they already have deepseek copy.")
+    parser.add_argument("--work-date", default="", help="Only regenerate items assigned to one work date, for example 2026-06-22.")
     args = parser.parse_args()
 
     if not writer.has_deepseek_key():
@@ -28,19 +30,24 @@ def main() -> int:
     db.init_db(conn)
     try:
         statuses = ("draft", "approved") if args.include_approved else ("draft",)
-        sql = """
+        status_filter = "1 = 1" if args.force else "generation_status != 'deepseek'"
+        status_placeholders = ",".join("?" for _ in statuses)
+        sql = f"""
             SELECT * FROM source_items
-            WHERE generation_status != 'deepseek'
+            WHERE {status_filter}
               AND publish_status NOT IN ('claimed', 'published')
-              AND review_status IN ({})
-        """.format(",".join("?" for _ in statuses))
+              AND review_status IN ({status_placeholders})
+        """
         params: list[object] = list(statuses)
         if args.source:
             sql += " AND source = ?"
             params.append(args.source)
+        if args.work_date:
+            sql += " AND work_date = ?"
+            params.append(args.work_date)
         if args.only_error:
             sql += " AND generation_status = 'error'"
-        sql += " ORDER BY id DESC LIMIT ?" if args.only_error else " ORDER BY id ASC LIMIT ?"
+        sql += " ORDER BY COALESCE(NULLIF(observed_at, ''), NULLIF(published_at, ''), created_at) DESC, id DESC LIMIT ?"
         params.append(max(1, args.limit))
 
         rows = list(conn.execute(sql, params))

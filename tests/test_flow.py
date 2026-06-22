@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.client
 import inspect
+import io
 import json
 import os
 import subprocess
@@ -329,8 +330,70 @@ class CopyFactoryFlowTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_items_for_work_date_orders_by_latest_observed_feed(self) -> None:
+        conn = db.connect(f"{self.tmp.name}/feed-order.sqlite3")
+        db.init_db(conn)
+        try:
+            for source_id, observed_at in (
+                ("older-feed", "2026-06-21T17:05:00Z"),
+                ("newer-feed", "2026-06-21T22:35:00Z"),
+            ):
+                db.insert_source_item(
+                    conn,
+                    {
+                        "source": "reddit",
+                        "source_id": source_id,
+                        "url": f"https://reddit.example/{source_id}",
+                        "title": source_id,
+                        "text": source_id,
+                        "author": "",
+                        "published_at": "2026-06-15T15:26:00Z",
+                        "observed_at": observed_at,
+                        "media_urls": [],
+                    },
+                    "batch",
+                )
+
+            self.assertEqual(
+                [row["source_id"] for row in db.items_for_work_date(conn, "2026-06-22")],
+                ["newer-feed", "older-feed"],
+            )
+        finally:
+            conn.close()
+
     def test_deepseek_writer_is_container_safe_http_client(self) -> None:
         self.assertNotIn("/Users/", inspect.getsource(writer.deepseek_writer))
+
+    def test_deepseek_prompt_requests_publishable_body_only(self) -> None:
+        old_urlopen = writer.urlopen
+        old_key = os.environ.get("DEEPSEEK_API_KEY")
+        captured: dict[str, object] = {}
+
+        class FakeResponse(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def fake_urlopen(req, timeout=0):
+            captured["payload"] = json.loads(req.data.decode())
+            return FakeResponse(json.dumps({"choices": [{"message": {"content": "直接正文"}}]}, ensure_ascii=False).encode())
+
+        try:
+            os.environ["DEEPSEEK_API_KEY"] = "sk-test"
+            writer.urlopen = fake_urlopen
+            result = writer.deepseek_writer({"source": "reddit", "title": "Options", "text": "English post"})
+            prompt = captured["payload"]["messages"][1]["content"]
+            self.assertEqual(result, "直接正文")
+            self.assertIn("只输出最终正文", prompt)
+            self.assertIn("不要写“标题：”“来源：”“核心提醒：”", prompt)
+        finally:
+            writer.urlopen = old_urlopen
+            if old_key is None:
+                os.environ.pop("DEEPSEEK_API_KEY", None)
+            else:
+                os.environ["DEEPSEEK_API_KEY"] = old_key
 
     def test_real_export_uses_health_generated_at_gate(self) -> None:
         calls = {"export": []}

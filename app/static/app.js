@@ -174,7 +174,7 @@ function itemCard(item, compact = false, context = "") {
 function reviewView() {
   const c = counts();
   const side = `<div class="panel"><h2>队列概览</h2><div class="queue-total"><strong>${c.all}</strong><span>全部内容</span></div>${Object.entries(c).filter(([k]) => k !== "all").map(([k,v]) => `<div class="kv"><span>${k}</span><strong>${v}</strong></div>`).join("")}</div>
-    <div class="panel soft"><h2>同步健康</h2><div class="kv"><span>状态</span><strong class="ok">正常</strong></div><p class="muted">最新 feed 按 generated_at 判断，只处理新增快照。</p></div>
+    <div class="panel soft"><h2>同步健康</h2><div class="kv"><span>状态</span><strong class="ok">正常</strong></div><p class="muted">今天/昨天按抓取时间判断，原文时间只用于展示。</p></div>
     <div class="panel"><h2>快捷操作</h2><button class="rail-action" onclick="go('sync')">刷新列表</button><button class="rail-action" onclick="go('schedule')">打开排期</button></div>`;
   const items = visibleItems().map((item) => itemCard(item)).join("") || `<p class="panel">暂无文案。换个日期或来源看看。</p>`;
   return shell(`<div class="topbar"><p class="eyebrow">Copy Factory</p><h1>内容审核工作台</h1><p class="muted">每天同步进来的内容按日期分开；昨天没选上的会保留在昨天或全部里。</p>${statBar()}</div><div class="feed-list">${items}</div>`, side);

@@ -375,9 +375,10 @@ def save_publish_result(conn: sqlite3.Connection, item_id: int, claim_token: str
 
 
 def items_for_work_date(conn: sqlite3.Connection, work_date: str = "") -> list[sqlite3.Row]:
+    feed_order = "COALESCE(NULLIF(observed_at, ''), NULLIF(published_at, ''), created_at)"
     if not work_date:
-        return list(conn.execute("SELECT * FROM source_items ORDER BY work_date DESC, updated_at DESC, id DESC"))
-    return list(conn.execute("SELECT * FROM source_items WHERE work_date = ? ORDER BY updated_at DESC, id DESC", (work_date,)))
+        return list(conn.execute(f"SELECT * FROM source_items ORDER BY work_date DESC, {feed_order} DESC, id DESC"))
+    return list(conn.execute(f"SELECT * FROM source_items WHERE work_date = ? ORDER BY {feed_order} DESC, id DESC", (work_date,)))
 
 
 def today_items(conn: sqlite3.Connection) -> list[sqlite3.Row]:
