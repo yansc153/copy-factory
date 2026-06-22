@@ -330,6 +330,50 @@ class CopyFactoryFlowTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_duplicate_without_observed_or_fetched_keeps_previous_observed_work_date(self) -> None:
+        conn = db.connect(f"{self.tmp.name}/duplicate-no-time.sqlite3")
+        db.init_db(conn)
+        try:
+            item_id, inserted = db.insert_source_item(
+                conn,
+                {
+                    "source": "xueqiu_hot",
+                    "source_id": "same-id",
+                    "url": "https://xueqiu.example/same",
+                    "title": "same",
+                    "text": "same text",
+                    "author": "",
+                    "published_at": "2026-06-21T06:53:16Z",
+                    "media_urls": [],
+                },
+                "batch-1",
+            )
+            self.assertTrue(inserted)
+            conn.execute("UPDATE source_items SET observed_at = '', work_date = '2026-06-21' WHERE id = ?", (item_id,))
+            conn.commit()
+
+            same_id, inserted = db.insert_source_item(
+                conn,
+                {
+                    "source": "xueqiu_hot",
+                    "source_id": "same-id",
+                    "url": "https://xueqiu.example/same",
+                    "title": "same",
+                    "text": "same text",
+                    "author": "",
+                    "published_at": "2026-06-22T06:53:16Z",
+                    "media_urls": [],
+                },
+                "batch-2",
+            )
+            row = db.get_item(conn, item_id)
+            self.assertEqual(same_id, item_id)
+            self.assertFalse(inserted)
+            self.assertEqual(row["observed_at"], "")
+            self.assertEqual(row["work_date"], "2026-06-21")
+        finally:
+            conn.close()
+
     def test_items_for_work_date_orders_by_latest_observed_feed(self) -> None:
         conn = db.connect(f"{self.tmp.name}/feed-order.sqlite3")
         db.init_db(conn)
