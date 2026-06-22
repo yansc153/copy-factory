@@ -16,6 +16,7 @@ def main() -> int:
     parser.add_argument("--source", default="", help="Only regenerate one source, for example reddit or xueqiu_hot.")
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--include-approved", action="store_true")
+    parser.add_argument("--only-error", action="store_true")
     args = parser.parse_args()
 
     if not writer.has_deepseek_key():
@@ -37,7 +38,9 @@ def main() -> int:
         if args.source:
             sql += " AND source = ?"
             params.append(args.source)
-        sql += " ORDER BY id ASC LIMIT ?"
+        if args.only_error:
+            sql += " AND generation_status = 'error'"
+        sql += " ORDER BY id DESC LIMIT ?" if args.only_error else " ORDER BY id ASC LIMIT ?"
         params.append(max(1, args.limit))
 
         rows = list(conn.execute(sql, params))

@@ -137,6 +137,10 @@ def observed_value(item: dict[str, Any]) -> str:
     return str(item.get("observed_at") or item.get("fetched_at") or item.get("published_at") or "")
 
 
+def capture_value(item: dict[str, Any]) -> str:
+    return str(item.get("observed_at") or item.get("fetched_at") or "")
+
+
 def work_date_for_item(item: dict[str, Any]) -> str:
     observed = parse_item_time(observed_value(item))
     return observed.astimezone(SHANGHAI).date().isoformat() if observed else work_today()
@@ -158,7 +162,7 @@ def insert_source_item(conn: sqlite3.Connection, item: dict[str, Any], sync_batc
     ts = now()
     existing = conn.execute(
         """
-        SELECT id FROM source_items
+        SELECT id, observed_at FROM source_items
         WHERE source = ?
           AND (
             (? != '' AND source_id = ?)
@@ -170,6 +174,19 @@ def insert_source_item(conn: sqlite3.Connection, item: dict[str, Any], sync_batc
         (item["source"], item.get("source_id", ""), item.get("source_id", ""), item.get("url", ""), item.get("url", ""), content_hash),
     ).fetchone()
     if existing:
+        incoming_observed = capture_value(item)
+        incoming_time = parse_item_time(incoming_observed)
+        existing_time = parse_item_time(str(existing["observed_at"] or ""))
+        if incoming_time and (not existing_time or incoming_time > existing_time):
+            conn.execute(
+                """
+                UPDATE source_items
+                SET observed_at = ?, work_date = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (incoming_observed, incoming_time.astimezone(SHANGHAI).date().isoformat(), ts, existing["id"]),
+            )
+            conn.commit()
         return int(existing["id"]), False
 
     cur = conn.execute(

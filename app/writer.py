@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import os
-import subprocess
-import tempfile
+import json
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 from app.config import Config
-
-
-HUAJIAO_SCRIPT = "/Users/oxjames/.codex/skills/huajiao-finance-writer/scripts/deepseek_generate.py"
 
 
 def has_deepseek_key() -> bool:
@@ -16,8 +13,16 @@ def has_deepseek_key() -> bool:
     return bool(os.getenv("DEEPSEEK_API_KEY") or (key_file and Path(key_file).exists()))
 
 
-def validate_deepseek_key() -> None:
+def deepseek_key() -> str:
     key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    key_file = os.getenv("DEEPSEEK_API_KEY_FILE", "").strip()
+    if key:
+        return key
+    return Path(key_file).read_text(encoding="utf-8").strip() if key_file else ""
+
+
+def validate_deepseek_key() -> None:
+    key = deepseek_key()
     if key and not key.startswith("sk-"):
         raise RuntimeError("DEEPSEEK_API_KEY looks invalid; expected it to start with sk-")
 
@@ -55,18 +60,42 @@ def fake_writer(item: dict[str, object]) -> str:
 
 def deepseek_writer(item: dict[str, object]) -> str:
     validate_deepseek_key()
-    source_text = f"# {item.get('title', '')}\n\n来源：{item.get('source', '')}\n作者：{item.get('author', '')}\n链接：{item.get('url', '')}\n\n语言处理：如果来源是英文，先转写成自然中文投资语境，不要在成稿里保留英文原句；如果来源是中文，保留原语境并重写。\n\n{item.get('text', '')}\n"
-    with tempfile.TemporaryDirectory() as tmp:
-        src = Path(tmp) / "source.md"
-        out = Path(tmp) / "out.md"
-        src.write_text(source_text, encoding="utf-8")
-        env = os.environ.copy()
-        env["VOICE_OUTPUT_MODE"] = "long-social"
-        timeout = int(os.getenv("DEEPSEEK_WRITER_TIMEOUT_SECONDS", "90"))
-        result = subprocess.run(["python3", HUAJIAO_SCRIPT, str(src), str(out)], env=env, capture_output=True, text=True, timeout=timeout)
-        if result.returncode:
-            raise RuntimeError((result.stderr or result.stdout or "DeepSeek writer failed")[-800:])
-        return out.read_text(encoding="utf-8")
+    prompt = f"""把下面素材改写成中文投资社媒稿。
+
+要求：
+- 如果来源是英文，先理解/翻译成自然中文投资语境，不要保留英文原句。
+- 不要逐句翻译，提炼资产、风险、资金流、情绪或交易含义。
+- 口吻直接，短段落，适合 Copy Factory 审核后发布。
+- 不要编造原文没有的信息。
+
+标题：{item.get('title', '')}
+来源：{item.get('source', '')}
+作者：{item.get('author', '')}
+链接：{item.get('url', '')}
+
+原文：
+{item.get('text', '')}
+"""
+    payload = json.dumps(
+        {
+            "model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+            "messages": [
+                {"role": "system", "content": "你是中文投资社媒写手，负责把市场素材改写成自然、克制、有判断力的中文稿。"},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.7,
+        },
+        ensure_ascii=False,
+    ).encode()
+    req = Request(
+        os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/chat/completions"),
+        data=payload,
+        headers={"Authorization": f"Bearer {deepseek_key()}", "Content-Type": "application/json"},
+    )
+    timeout = int(os.getenv("DEEPSEEK_WRITER_TIMEOUT_SECONDS", "90"))
+    with urlopen(req, timeout=timeout) as response:
+        data = json.load(response)
+    return str(data["choices"][0]["message"]["content"]).strip()
 
 
 def generate_copy(item: dict[str, object], config: Config) -> tuple[str, str]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import http.client
+import inspect
 import json
 import os
 import subprocess
@@ -277,6 +278,59 @@ class CopyFactoryFlowTest(unittest.TestCase):
             self.assertEqual([row["source_id"] for row in db.items_for_work_date(conn, "2026-06-21")], ["fallback-published"])
         finally:
             conn.close()
+
+    def test_duplicate_refreshes_observed_work_date_without_overwriting_review(self) -> None:
+        conn = db.connect(f"{self.tmp.name}/duplicate-observed.sqlite3")
+        db.init_db(conn)
+        try:
+            item_id, inserted = db.insert_source_item(
+                conn,
+                {
+                    "source": "xueqiu_hot",
+                    "source_id": "same-id",
+                    "url": "https://xueqiu.example/same",
+                    "title": "same",
+                    "text": "same text",
+                    "author": "",
+                    "published_at": "2026-06-21T06:53:16Z",
+                    "media_urls": [],
+                },
+                "batch-1",
+            )
+            self.assertTrue(inserted)
+            db.save_generation(conn, item_id, "人工保留文案", status="deepseek")
+            db.save_review(conn, item_id, "人工编辑", "approved")
+            conn.execute("UPDATE source_items SET observed_at = '', work_date = '2026-06-21' WHERE id = ?", (item_id,))
+            conn.commit()
+
+            same_id, inserted = db.insert_source_item(
+                conn,
+                {
+                    "source": "xueqiu_hot",
+                    "source_id": "same-id",
+                    "url": "https://xueqiu.example/same",
+                    "title": "same",
+                    "text": "same text",
+                    "author": "",
+                    "published_at": "2026-06-21T06:53:16Z",
+                    "observed_at": "2026-06-21T23:42:54Z",
+                    "media_urls": [],
+                },
+                "batch-2",
+            )
+            row = db.get_item(conn, item_id)
+            self.assertEqual(same_id, item_id)
+            self.assertFalse(inserted)
+            self.assertEqual(row["observed_at"], "2026-06-21T23:42:54Z")
+            self.assertEqual(row["work_date"], "2026-06-22")
+            self.assertEqual(row["generated_copy"], "人工保留文案")
+            self.assertEqual(row["edited_copy"], "人工编辑")
+            self.assertEqual(row["review_status"], "approved")
+        finally:
+            conn.close()
+
+    def test_deepseek_writer_is_container_safe_http_client(self) -> None:
+        self.assertNotIn("/Users/", inspect.getsource(writer.deepseek_writer))
 
     def test_real_export_uses_health_generated_at_gate(self) -> None:
         calls = {"export": []}
