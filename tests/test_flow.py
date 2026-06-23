@@ -169,6 +169,28 @@ class CopyFactoryFlowTest(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
+    def test_reconfirming_failed_publish_clears_old_result_at(self) -> None:
+        run_sync(self.config)
+        conn = db.connect(self.config.db_path)
+        try:
+            item_id = conn.execute("SELECT id FROM source_items ORDER BY id LIMIT 1").fetchone()["id"]
+            db.save_review(conn, item_id, "retry me", "approved")
+            db.save_schedule(conn, item_id, "2000-01-01T00:00:00.000Z")
+            self.assertEqual(db.confirm_publish_plan(conn), 1)
+            first = db.claim_due(conn, limit=1)[0]
+            self.assertTrue(db.save_publish_result(conn, item_id, first[1], "failed", "wrong_schedule_date"))
+
+            self.assertEqual(db.confirm_publish_plan(conn), 1)
+            reconfirmed = db.get_item(conn, item_id)
+            self.assertEqual(reconfirmed["publish_status"], "confirmed")
+            self.assertEqual(reconfirmed["publish_result_at"], "")
+
+            second = db.claim_due(conn, limit=1)[0][0]
+            self.assertEqual(second["publish_status"], "claimed")
+            self.assertEqual(second["publish_result_at"], "")
+        finally:
+            conn.close()
+
     def test_production_requires_deepseek_key_for_generation(self) -> None:
         old_key = os.environ.pop("DEEPSEEK_API_KEY", None)
         old_key_file = os.environ.pop("DEEPSEEK_API_KEY_FILE", None)

@@ -296,7 +296,9 @@ def confirm_publish_plan(conn: sqlite3.Connection) -> int:
     cur = conn.execute(
         """
         UPDATE source_items
-        SET publish_status = 'confirmed', publish_confirmed_at = ?, publish_error = '', updated_at = ?
+        SET publish_status = 'confirmed', publish_confirmed_at = ?,
+            publish_claimed_at = '', publish_claim_token = '',
+            publish_result_at = '', publish_error = '', updated_at = ?
         WHERE review_status = 'approved'
           AND schedule_status = 'scheduled'
           AND scheduled_at != ''
@@ -343,7 +345,8 @@ def claim_due(conn: sqlite3.Connection, due_at: str = "", limit: int = 1) -> lis
             conn.execute(
                 """
                 UPDATE source_items
-                SET publish_status = 'claimed', publish_claimed_at = ?, publish_claim_token = ?, updated_at = ?
+                SET publish_status = 'claimed', publish_claimed_at = ?, publish_claim_token = ?,
+                    publish_result_at = '', publish_error = '', updated_at = ?
                 WHERE id = ? AND publish_status = 'confirmed'
                 """,
                 (ts, token, ts, row["id"]),
