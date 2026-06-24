@@ -103,6 +103,13 @@ class CopyFactoryFlowTest(unittest.TestCase):
             self.assertEqual([task["status"] for task in queue_payload["tasks"]], ["confirmed", "confirmed", "confirmed"])
             self.assertEqual(queue_payload["tasks"][0]["selected_media_url"], selected_media)
 
+            cancel_body = json.dumps({"item_id": item_ids[2]}, ensure_ascii=False)
+            conn.request("POST", "/api/publish/cancel", cancel_body, {"Content-Type": "application/json", "Cookie": cookie})
+            cancelled = conn.getresponse()
+            cancelled_payload = json.loads(cancelled.read().decode())
+            self.assertEqual(cancelled.status, 200)
+            self.assertEqual([task["status"] for task in cancelled_payload["tasks"]], ["confirmed", "confirmed"])
+
             worker_headers = {"Content-Type": "application/json", "Authorization": "Bearer worker-secret"}
             claim_body = json.dumps({"now": "9999-12-31T23:59:59Z", "limit": 1}).encode()
             conn.request("POST", "/api/publish/claim_due", claim_body, worker_headers)
@@ -137,8 +144,8 @@ class CopyFactoryFlowTest(unittest.TestCase):
             conn.request("POST", "/api/publish/claim_due", claim_body, worker_headers)
             failed_claim = conn.getresponse()
             failed_tasks = json.loads(failed_claim.read().decode())["tasks"]
-            self.assertEqual(len(failed_tasks), 2)
-            self.assertIn("2999-01-01T00:00:00.000Z", [task["scheduled_at"] for task in failed_tasks])
+            self.assertEqual(len(failed_tasks), 1)
+            self.assertNotIn("2999-01-01T00:00:00.000Z", [task["scheduled_at"] for task in failed_tasks])
             failed_task = failed_tasks[0]
             result_body = json.dumps(
                 {
@@ -159,12 +166,15 @@ class CopyFactoryFlowTest(unittest.TestCase):
 
             db_conn = db.connect(self.config.db_path)
             row = db.get_item(db_conn, item_ids[0])
+            cancelled_row = db.get_item(db_conn, item_ids[2])
             db_conn.close()
             self.assertEqual(row["edited_copy"], f"{edited} 0")
             self.assertEqual(row["review_status"], "approved")
             self.assertEqual(row["schedule_status"], "scheduled")
             self.assertEqual(row["scheduled_at"], "2000-01-01T00:00:00.000Z")
             self.assertEqual(row["publish_status"], "published")
+            self.assertEqual(cancelled_row["schedule_status"], "scheduled")
+            self.assertEqual(cancelled_row["publish_status"], "none")
         finally:
             server.shutdown()
             server.server_close()
@@ -242,6 +252,46 @@ class CopyFactoryFlowTest(unittest.TestCase):
             self.assertEqual(released["publish_claim_token"], "")
             self.assertEqual(released["publish_error"], "chrome_unavailable")
             self.assertFalse(db.release_claim(conn, task["id"], token, "old token"))
+        finally:
+            conn.close()
+
+    def test_cancel_confirmed_publish_keeps_schedule_editable(self) -> None:
+        run_sync(self.config)
+        conn = db.connect(self.config.db_path)
+        try:
+            item_id = conn.execute("SELECT id FROM source_items ORDER BY id LIMIT 1").fetchone()["id"]
+            db.save_review(conn, item_id, "cancel before due", "approved")
+            db.save_schedule(conn, item_id, "2999-01-01T00:00:00.000Z")
+            self.assertEqual(db.confirm_publish_plan(conn), 1)
+
+            self.assertTrue(db.cancel_publish_confirmation(conn, item_id))
+            cancelled = db.get_item(conn, item_id)
+            self.assertEqual(cancelled["publish_status"], "none")
+            self.assertEqual(cancelled["schedule_status"], "scheduled")
+            self.assertEqual(cancelled["scheduled_at"], "2999-01-01T00:00:00.000Z")
+
+            self.assertTrue(db.save_schedule(conn, item_id, "2999-01-02T00:00:00.000Z"))
+            rescheduled = db.get_item(conn, item_id)
+            self.assertEqual(rescheduled["publish_status"], "none")
+            self.assertEqual(rescheduled["scheduled_at"], "2999-01-02T00:00:00.000Z")
+        finally:
+            conn.close()
+
+    def test_cancel_confirmed_publish_rejects_claimed_task(self) -> None:
+        run_sync(self.config)
+        conn = db.connect(self.config.db_path)
+        try:
+            item_id = conn.execute("SELECT id FROM source_items ORDER BY id LIMIT 1").fetchone()["id"]
+            db.save_review(conn, item_id, "already executing", "approved")
+            db.save_schedule(conn, item_id, "2000-01-01T00:00:00.000Z")
+            self.assertEqual(db.confirm_publish_plan(conn), 1)
+            db.claim_due(conn, "9999-12-31T23:59:59.000Z", limit=1)
+
+            self.assertFalse(db.cancel_publish_confirmation(conn, item_id))
+            self.assertFalse(db.save_schedule(conn, item_id, "2999-01-01T00:00:00.000Z"))
+            self.assertFalse(db.clear_schedule(conn, item_id))
+            claimed = db.get_item(conn, item_id)
+            self.assertEqual(claimed["publish_status"], "claimed")
         finally:
             conn.close()
 

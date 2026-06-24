@@ -65,7 +65,8 @@ Meaning:
 - `published`: Mac mini reported success.
 - `failed`: Mac mini reported failure; human can edit/reschedule/reconfirm.
 
-Once an item is `claimed` or `published`, normal web edits and reschedules are locked.
+Before claim, a confirmed item can be cancelled, rescheduled, or unscheduled from the browser. These actions clear publish state back to `none`, so a human must confirm the plan again before Mac mini can claim it.
+Once an item is `claimed` or `published`, normal web edits, reschedules, and cancellations are locked.
 Claimed tasks automatically return to `confirmed` after the server claim TTL if no result is written.
 
 ## Mac Mini API Contract
@@ -92,6 +93,7 @@ Content-Type: application/json
 ```
 
 The server decides whether `scheduled_at` is due. The Mac mini publisher must not apply its own due-time gate; if a task is returned here, it is ready to publish.
+If a browser user cancels or reschedules before claim, that task will not be returned by `claim_due` until it is confirmed again.
 
 Claim response task shape:
 

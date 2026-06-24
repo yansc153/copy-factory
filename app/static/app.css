@@ -529,6 +529,21 @@ select, input {
   background: #ffffff;
 }
 .confirm-bar p { margin: 4px 0 0; }
+.queue-metrics {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.queue-metrics span {
+  border: 1px solid #dfe7ef;
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: #475467;
+  background: #f8fafc;
+  font-size: 12px;
+  font-weight: 760;
+}
 .schedule-board { min-width: 0; }
 .slot-grid {
   padding: 18px;
@@ -608,10 +623,36 @@ select, input {
   cursor: grab;
   box-shadow: 0 10px 20px rgba(55, 73, 92, .06);
 }
+.mini-card.status-confirmed {
+  border-color: #f0c56b;
+  background: #fffaf0;
+}
+.mini-card.status-claimed {
+  border-color: #b9caff;
+  background: #f4f7ff;
+  cursor: default;
+}
+.mini-card.status-published {
+  border-color: #b9f2d4;
+  background: #f4fcf8;
+  cursor: default;
+}
 .slot .mini-card {
   margin-top: 0;
   border-color: #cfd9ff;
   background: #ffffff;
+}
+.slot .mini-card.status-confirmed {
+  border-color: #f0c56b;
+  background: #fffaf0;
+}
+.slot .mini-card.status-claimed {
+  border-color: #b9caff;
+  background: #f4f7ff;
+}
+.slot .mini-card.status-published {
+  border-color: #b9f2d4;
+  background: #f4fcf8;
 }
 .mini-card .item-head { gap: 5px; }
 .mini-card .source-line {
@@ -631,9 +672,30 @@ select, input {
   line-height: 1.45;
 }
 .mini-card .actions { margin-top: 8px; }
+.slot-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 8px 0 12px;
+  padding-top: 2px;
+}
+.status-note {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  border: 1px solid #dfe7ef;
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: #667085;
+  background: #f8fafc;
+  font-size: 12px;
+  font-weight: 780;
+}
 .unschedule-btn {
-  margin-top: 6px;
+  margin-left: auto;
   padding: 6px 9px;
+  background: #fff8f8;
 }
 .tabbar { display: none; }
 

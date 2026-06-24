@@ -74,6 +74,18 @@ function sourceLabel(value) {
   return value.includes("xueqiu") ? "雪球" : value.includes("reddit") ? "Reddit" : value;
 }
 
+function reviewStatusLabel(value) {
+  return { draft: "待审", approved: "已通过", rejected: "已拒绝" }[value] || value || "";
+}
+
+function generationStatusLabel(value) {
+  return { pending: "待生成", generated: "已生成", deepseek: "DeepSeek", error: "生成失败" }[value] || value || "";
+}
+
+function publishStatusLabel(value) {
+  return { confirmed: "待发布", claimed: "发布中", published: "已发布", failed: "失败" }[value] || value || "";
+}
+
 function visibleItems() {
   const bySource = state.sourceFilter === "all" ? state.items : state.items.filter((item) => sourceKind(item) === state.sourceFilter);
   const query = state.searchQuery.trim().toLowerCase();
@@ -101,7 +113,7 @@ function counts(items = visibleItems()) {
 }
 
 function canMove(item) {
-  return item.review_status === "approved" && ["none", "failed"].includes(item.publish_status || "none");
+  return item.review_status === "approved" && ["none", "failed", "confirmed"].includes(item.publish_status || "none");
 }
 
 function syncBusy() {
@@ -176,16 +188,16 @@ function itemCard(item, compact = false, context = "") {
   const observed = item.observed_at ? `抓取 ${formatApiTime(item.observed_at)}` : "";
   const published = item.published_at ? `原文 ${formatApiTime(item.published_at)}` : "";
   const timeLine = [observed, published].filter(Boolean).join(" · ");
-  return `<article class="${compact ? "mini-card" : "feed-item"}" draggable="${canMove(item)}" ondragstart="dragItem(event, ${item.id})">
+  return `<article class="${compact ? "mini-card" : "feed-item"} status-${h(item.publish_status || "none")}" draggable="${canMove(item)}" ondragstart="dragItem(event, ${item.id})">
     ${compact ? "" : `<div class="avatar ${sourceKind(item)}">${h(label[0]?.toUpperCase() || "C")}</div>`}
     <div class="item-body">
       <div class="item-head">
         <span class="source-line">${h(label)} ${timeLine ? "· " + h(timeLine) : ""}</span>
         <span class="item-title">${h(item.title || "Untitled")}</span>
-        <span class="pill ${item.review_status}">${item.review_status}</span>
-        <span class="pill">${item.generation_status}</span>
+        <span class="pill ${item.review_status}">${h(reviewStatusLabel(item.review_status))}</span>
+        <span class="pill">${h(generationStatusLabel(item.generation_status))}</span>
         ${item.schedule_status === "scheduled" ? `<span class="pill approved">${h(scheduled)}</span>` : ""}
-        ${item.publish_status && item.publish_status !== "none" ? `<span class="pill publish">${h(item.publish_status)}</span>` : ""}
+        ${item.publish_status && item.publish_status !== "none" ? `<span class="pill publish">${h(publishStatusLabel(item.publish_status))}</span>` : ""}
       </div>
       ${selectedMedia(item) ? `<img class="selected-media ${compact ? "compact" : ""}" src="${h(selectedMedia(item))}" alt="选中配图">` : ""}
       <p class="copy">${h(copy)}</p>
@@ -266,8 +278,9 @@ function scheduleView() {
   const slots = scheduleSlots();
   const ready = confirmableItems();
   const hiddenPast = hiddenPastScheduledCount();
-  return shell(`<div class="topbar schedule-top"><div><p class="eyebrow">Publish desk</p><h1>发布排期</h1><p class="muted">按小时排布未来 48 小时的内容，把通过的文案拖到合适时间。</p>${statBar()}</div></div>
-    <div class="timeline schedule-planner"><aside class="approved-pool"><div class="pool-head"><h2>待排内容</h2><span>${approved.length}</span></div>${approved.map((x) => itemCard(x, true, "pool")).join("") || `<p class="empty-note">没有未排期 approved 文案。</p>`}</aside><section class="schedule-board"><div class="confirm-bar"><div><strong>${ready.length} 条可确认</strong><p class="muted">当前视图未来 48 小时；发布队列总计 ${state.publishQueue.length} 条，已确认 ${state.publishQueue.filter((x) => x.status === "confirmed").length} 条。</p>${hiddenPast ? `<p class="muted">已隐藏 ${hiddenPast} 条过去排期，避免误确认历史内容。</p>` : ""}</div><button class="primary" onclick="confirmPublishPlan()" ${ready.length ? "" : "disabled"}>确认发布计划</button></div><div class="slot-grid">${slotGroups(slots).map(dayView).join("")}</div></section></div>`);
+  const queue = publishQueueCounts();
+  return shell(`<div class="topbar schedule-top"><div><p class="eyebrow">Publish desk</p><h1>发布排期</h1><p class="muted">未来 48 小时预约发布；未领取前可以撤销确认或改期。</p>${statBar()}</div></div>
+    <div class="timeline schedule-planner"><aside class="approved-pool"><div class="pool-head"><h2>待排内容</h2><span>${approved.length}</span></div>${approved.map((x) => itemCard(x, true, "pool")).join("") || `<p class="empty-note">没有待排的已通过文案。</p>`}</aside><section class="schedule-board"><div class="confirm-bar"><div><strong>${ready.length} 条待确认</strong><div class="queue-metrics"><span>待发布 ${queue.confirmed}</span><span>发布中 ${queue.claimed}</span><span>已完成 ${queue.published}</span><span>失败 ${queue.failed}</span></div>${hiddenPast ? `<p class="muted">已隐藏 ${hiddenPast} 条过去排期，避免误确认历史内容。</p>` : ""}</div><button class="primary" onclick="confirmPublishPlan()" ${ready.length ? "" : "disabled"}>确认发布计划</button></div><div class="slot-grid">${slotGroups(slots).map(dayView).join("")}</div></section></div>`);
 }
 
 function scheduledReady() {
@@ -300,10 +313,32 @@ function hiddenPastScheduledCount() {
   return visibleItems().filter((x) => x.scheduled_at && !inPlanningWindow(x.scheduled_at)).length;
 }
 
+function publishQueueCounts() {
+  return {
+    confirmed: state.publishQueue.filter((x) => x.status === "confirmed").length,
+    claimed: state.publishQueue.filter((x) => x.status === "claimed").length,
+    published: state.publishQueue.filter((x) => x.status === "published").length,
+    failed: state.publishQueue.filter((x) => x.status === "failed").length,
+  };
+}
+
 function slotView(slot) {
   const items = visibleItems().filter((x) => x.scheduled_at === slot);
   const parts = formatSlotParts(slot);
-  return `<div class="slot" ondragover="allowDrop(event)" ondragleave="event.currentTarget.classList.remove('dragover')" ondrop="dropItem(event, '${slot}')"><time>${parts.time}</time><div class="slot-drop">${items.map((x) => itemCard(x, true) + (canMove(x) ? `<button class="small-btn unschedule-btn" onclick="unschedule(${x.id})">移出</button>` : "")).join("") || `<span>空档</span>`}</div></div>`;
+  return `<div class="slot" ondragover="allowDrop(event)" ondragleave="event.currentTarget.classList.remove('dragover')" ondrop="dropItem(event, '${slot}')"><time>${parts.time}</time><div class="slot-drop">${items.map(slotItem).join("") || `<span>空档</span>`}</div></div>`;
+}
+
+function slotItem(item) {
+  return `${itemCard(item, true)}${slotActions(item)}`;
+}
+
+function slotActions(item) {
+  if (item.publish_status === "claimed") return `<div class="slot-actions"><span class="status-note">发布中</span></div>`;
+  if (item.publish_status === "published") return `<div class="slot-actions"><span class="status-note">已发布</span></div>`;
+  const actions = [];
+  if (item.publish_status === "confirmed") actions.push(`<button class="small-btn" onclick="cancelPublish(event, ${item.id})">撤销确认</button>`);
+  if (canMove(item)) actions.push(`<button class="small-btn danger unschedule-btn" onclick="unschedule(event, ${item.id})">移出排期</button>`);
+  return actions.length ? `<div class="slot-actions">${actions.join("")}</div>` : "";
 }
 
 function slotGroups(slots) {
@@ -432,8 +467,23 @@ async function dropItem(event, scheduled_at) {
   await api(`/api/items/${event.dataTransfer.getData("text/plain")}/schedule`, { scheduled_at });
   await refresh();
 }
-async function unschedule(id) { await api(`/api/items/${id}/unschedule`, {}); await refresh(); }
+async function unschedule(event, id) {
+  event?.stopPropagation();
+  const item = state.items.find((x) => x.id === id);
+  const message = item?.publish_status === "confirmed"
+    ? "移出排期会同时撤销发布确认。确定移出？"
+    : "确定把这条内容移出排期？";
+  if (!window.confirm(message)) return;
+  await api(`/api/items/${id}/unschedule`, {});
+  await refresh();
+}
 async function quickSchedule(id) { await api(`/api/items/${id}/schedule`, { scheduled_at: nextSlots()[0] }); await refresh(); }
+async function cancelPublish(event, id) {
+  event?.stopPropagation();
+  const result = await api("/api/publish/cancel", { item_id: id });
+  state.publishQueue = result.tasks;
+  await refresh();
+}
 async function confirmPublishPlan() {
   const result = await api("/api/publish/confirm_plan", {});
   state.publishQueue = result.tasks;

@@ -197,6 +197,7 @@ The browser app is served by `app.web` and talks to JSON endpoints:
 - `POST /api/items/:id/schedule`
 - `POST /api/items/:id/unschedule`
 - `POST /api/publish/confirm_plan` browser session only; confirms approved and scheduled items.
+- `POST /api/publish/cancel` browser session only; body `{"item_id":1}`; cancels an unclaimed confirmed task and keeps its schedule editable.
 - `GET /api/publish/queue` browser session or `Authorization: Bearer <COPY_FACTORY_PUBLISH_TOKEN>`; lists confirmed/claimed/published/failed tasks.
 - `POST /api/publish/claim_due` bearer token or browser session; body `{"limit":1}`; atomically marks due confirmed tasks as `claimed`, and returns `claim_token`. The server only returns tasks whose `scheduled_at` is due by server clock.
 - `POST /api/publish/release` bearer token or browser session; body `{"item_id":1,"claim_token":"...","reason":"chrome_unavailable"}`; returns a claimed task to `confirmed`.
@@ -212,8 +213,8 @@ Failure flow:
 
 Claimed tasks automatically return to `confirmed` if no result is written back before the claim TTL expires. The Mac mini can also release a claim explicitly when preflight fails.
 
-Rescheduling an item clears publish state back to `none`, so confirmation remains an explicit final step.
-Confirmed or failed items can be edited and then reconfirmed. Claimed or published items are locked from ordinary edit/reschedule actions.
+Before a task is claimed, the browser can cancel confirmation and keep the scheduled slot. Rescheduling or unscheduling a confirmed item also clears publish state back to `none`, so confirmation remains an explicit final step after any time change.
+Confirmed or failed items can be edited and then reconfirmed. Claimed or published items are locked from ordinary edit/reschedule/cancel actions.
 
 ## What Works Now
 

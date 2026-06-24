@@ -277,7 +277,7 @@ def save_schedule(conn: sqlite3.Connection, item_id: int, scheduled_at: str) -> 
         SET schedule_status = 'scheduled', scheduled_at = ?, publish_status = 'none',
             publish_confirmed_at = '', publish_claimed_at = '', publish_claim_token = '',
             publish_result_at = '', publish_error = '', updated_at = ?
-        WHERE id = ? AND publish_status IN ('none', 'failed')
+        WHERE id = ? AND publish_status IN ('none', 'failed', 'confirmed')
         """,
         (scheduled_at, now(), item_id),
     )
@@ -292,7 +292,7 @@ def clear_schedule(conn: sqlite3.Connection, item_id: int) -> bool:
         SET schedule_status = 'unscheduled', scheduled_at = '', publish_status = 'none',
             publish_confirmed_at = '', publish_claimed_at = '', publish_claim_token = '',
             publish_result_at = '', publish_error = '', updated_at = ?
-        WHERE id = ? AND publish_status IN ('none', 'failed')
+        WHERE id = ? AND publish_status IN ('none', 'failed', 'confirmed')
         """,
         (now(), item_id),
     )
@@ -317,6 +317,21 @@ def confirm_publish_plan(conn: sqlite3.Connection) -> int:
     )
     conn.commit()
     return int(cur.rowcount)
+
+
+def cancel_publish_confirmation(conn: sqlite3.Connection, item_id: int) -> bool:
+    cur = conn.execute(
+        """
+        UPDATE source_items
+        SET publish_status = 'none', publish_confirmed_at = '',
+            publish_claimed_at = '', publish_claim_token = '',
+            publish_result_at = '', publish_error = '', updated_at = ?
+        WHERE id = ? AND publish_status = 'confirmed'
+        """,
+        (now(), item_id),
+    )
+    conn.commit()
+    return int(cur.rowcount) == 1
 
 
 def release_expired_claims(conn: sqlite3.Connection, cutoff: str = "") -> int:

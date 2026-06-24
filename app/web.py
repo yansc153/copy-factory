@@ -199,6 +199,8 @@ class Handler(BaseHTTPRequestHandler):
             self.clear_schedule_api(path)
         elif path == "/api/publish/confirm_plan":
             self.confirm_publish_plan_api()
+        elif path == "/api/publish/cancel":
+            self.cancel_publish_confirmation_api(payload)
         elif path == "/api/publish/claim_due":
             self.claim_due_api(payload)
         elif path == "/api/publish/release":
@@ -264,6 +266,18 @@ class Handler(BaseHTTPRequestHandler):
         try:
             confirmed = db.confirm_publish_plan(conn)
             self.send_json({"confirmed": confirmed, "tasks": [row_to_publish_task(row) for row in db.publish_queue(conn)]})
+        finally:
+            conn.close()
+
+    def cancel_publish_confirmation_api(self, payload: dict[str, object]) -> None:
+        item_id = int(payload.get("item_id") or 0)
+        conn = db.connect(self.config.db_path)
+        db.init_db(conn)
+        try:
+            if not db.cancel_publish_confirmation(conn, item_id):
+                self.send_json({"error": "only confirmed unclaimed tasks can be cancelled"}, 409)
+                return
+            self.send_json({"item": row_to_item(db.get_item(conn, item_id)), "tasks": [row_to_publish_task(row) for row in db.publish_queue(conn)]})
         finally:
             conn.close()
 

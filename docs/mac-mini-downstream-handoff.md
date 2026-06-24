@@ -136,9 +136,16 @@ Contract guarantees:
 - Every returned task is `confirmed`.
 - Every returned task is due by the Copy Factory server clock.
 - Published, failed, and unexpired claimed tasks are never returned.
+- Browser-side cancellations or reschedules remove tasks from future claim responses until they are confirmed again.
 - A claimed task that misses the server claim TTL is released back to `confirmed` and can be claimed again.
 
 The Mac mini should not re-check `scheduled_at`. If the server returns a task, publish it or release/fail it.
+
+### Browser Cancellation Boundary
+
+Copy Factory operators can cancel confirmation, unschedule, or reschedule a task while it is still `confirmed`.
+
+The downstream worker does not need a cancel endpoint. It must only trust `POST /api/publish/claim_due`; if a human cancels before the scheduled time, the task simply will not be returned. Once a task is `claimed`, ordinary browser cancellation is blocked and the worker owns the next transition: `published`, `failed`, or explicit `release`.
 
 ### Release Claim
 
