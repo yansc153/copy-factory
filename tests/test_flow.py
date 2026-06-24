@@ -362,6 +362,16 @@ class CopyFactoryFlowTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_add_column_treats_concurrent_duplicate_as_success(self) -> None:
+        conn = db.connect(f"{self.tmp.name}/duplicate-column.sqlite3")
+        try:
+            conn.execute("CREATE TABLE source_items (id INTEGER PRIMARY KEY, selected_media_url TEXT NOT NULL DEFAULT '')")
+            db.add_column_if_missing(conn, set(), "selected_media_url", "TEXT NOT NULL DEFAULT ''")
+            columns = [row["name"] for row in conn.execute("PRAGMA table_info(source_items)")]
+            self.assertEqual(columns.count("selected_media_url"), 1)
+        finally:
+            conn.close()
+
     def test_duplicate_refreshes_observed_work_date_without_overwriting_review(self) -> None:
         conn = db.connect(f"{self.tmp.name}/duplicate-observed.sqlite3")
         db.init_db(conn)

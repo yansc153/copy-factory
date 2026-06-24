@@ -88,16 +88,11 @@ def init_db(conn: sqlite3.Connection) -> None:
 
 def ensure_columns(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(source_items)")}
-    if "schedule_status" not in columns:
-        conn.execute("ALTER TABLE source_items ADD COLUMN schedule_status TEXT NOT NULL DEFAULT 'unscheduled'")
-    if "scheduled_at" not in columns:
-        conn.execute("ALTER TABLE source_items ADD COLUMN scheduled_at TEXT NOT NULL DEFAULT ''")
-    if "selected_media_url" not in columns:
-        conn.execute("ALTER TABLE source_items ADD COLUMN selected_media_url TEXT NOT NULL DEFAULT ''")
-    if "work_date" not in columns:
-        conn.execute("ALTER TABLE source_items ADD COLUMN work_date TEXT NOT NULL DEFAULT ''")
-    if "observed_at" not in columns:
-        conn.execute("ALTER TABLE source_items ADD COLUMN observed_at TEXT NOT NULL DEFAULT ''")
+    add_column_if_missing(conn, columns, "schedule_status", "TEXT NOT NULL DEFAULT 'unscheduled'")
+    add_column_if_missing(conn, columns, "scheduled_at", "TEXT NOT NULL DEFAULT ''")
+    add_column_if_missing(conn, columns, "selected_media_url", "TEXT NOT NULL DEFAULT ''")
+    add_column_if_missing(conn, columns, "work_date", "TEXT NOT NULL DEFAULT ''")
+    add_column_if_missing(conn, columns, "observed_at", "TEXT NOT NULL DEFAULT ''")
     conn.execute("UPDATE source_items SET work_date = substr(created_at, 1, 10) WHERE work_date = ''")
     for name in (
         "publish_status",
@@ -107,9 +102,19 @@ def ensure_columns(conn: sqlite3.Connection) -> None:
         "publish_result_at",
         "publish_error",
     ):
-        if name not in columns:
-            default = "none" if name == "publish_status" else ""
-            conn.execute(f"ALTER TABLE source_items ADD COLUMN {name} TEXT NOT NULL DEFAULT '{default}'")
+        default = "none" if name == "publish_status" else ""
+        add_column_if_missing(conn, columns, name, f"TEXT NOT NULL DEFAULT '{default}'")
+
+
+def add_column_if_missing(conn: sqlite3.Connection, columns: set[str], name: str, definition: str) -> None:
+    if name in columns:
+        return
+    try:
+        conn.execute(f"ALTER TABLE source_items ADD COLUMN {name} {definition}")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise
+    columns.add(name)
 
 
 def now() -> str:
