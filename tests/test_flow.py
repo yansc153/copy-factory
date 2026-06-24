@@ -191,6 +191,60 @@ class CopyFactoryFlowTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_claim_due_waits_until_scheduled_time(self) -> None:
+        run_sync(self.config)
+        conn = db.connect(self.config.db_path)
+        try:
+            item_id = conn.execute("SELECT id FROM source_items ORDER BY id LIMIT 1").fetchone()["id"]
+            db.save_review(conn, item_id, "future post", "approved")
+            db.save_schedule(conn, item_id, "2999-01-01T00:00:00.000Z")
+            self.assertEqual(db.confirm_publish_plan(conn), 1)
+
+            self.assertEqual(db.claim_due(conn, "2026-06-24T00:00:00.000Z", limit=1), [])
+            due = db.claim_due(conn, "9999-12-31T23:59:59.000Z", limit=1)
+            self.assertEqual(len(due), 1)
+            self.assertEqual(due[0][0]["id"], item_id)
+        finally:
+            conn.close()
+
+    def test_expired_claim_is_released_and_reclaimed(self) -> None:
+        run_sync(self.config)
+        conn = db.connect(self.config.db_path)
+        try:
+            item_id = conn.execute("SELECT id FROM source_items ORDER BY id LIMIT 1").fetchone()["id"]
+            db.save_review(conn, item_id, "retry after crash", "approved")
+            db.save_schedule(conn, item_id, "2000-01-01T00:00:00.000Z")
+            self.assertEqual(db.confirm_publish_plan(conn), 1)
+            first = db.claim_due(conn, "9999-12-31T23:59:59.000Z", limit=1)[0]
+            first_token = first[1]
+            conn.execute("UPDATE source_items SET publish_claimed_at = ? WHERE id = ?", ("2000-01-01T00:00:00+00:00", item_id))
+            conn.commit()
+
+            second = db.claim_due(conn, "9999-12-31T23:59:59.000Z", limit=1)[0]
+            self.assertEqual(second[0]["id"], item_id)
+            self.assertNotEqual(second[1], first_token)
+        finally:
+            conn.close()
+
+    def test_release_claim_returns_task_to_confirmed(self) -> None:
+        run_sync(self.config)
+        conn = db.connect(self.config.db_path)
+        try:
+            item_id = conn.execute("SELECT id FROM source_items ORDER BY id LIMIT 1").fetchone()["id"]
+            db.save_review(conn, item_id, "release me", "approved")
+            db.save_schedule(conn, item_id, "2000-01-01T00:00:00.000Z")
+            self.assertEqual(db.confirm_publish_plan(conn), 1)
+            task, token = db.claim_due(conn, "9999-12-31T23:59:59.000Z", limit=1)[0]
+
+            self.assertTrue(db.release_claim(conn, task["id"], token, "chrome_unavailable"))
+            released = db.get_item(conn, item_id)
+            self.assertEqual(released["publish_status"], "confirmed")
+            self.assertEqual(released["publish_claim_token"], "")
+            self.assertEqual(released["publish_error"], "chrome_unavailable")
+            self.assertFalse(db.release_claim(conn, task["id"], token, "old token"))
+        finally:
+            conn.close()
+
     def test_production_requires_deepseek_key_for_generation(self) -> None:
         old_key = os.environ.pop("DEEPSEEK_API_KEY", None)
         old_key_file = os.environ.pop("DEEPSEEK_API_KEY_FILE", None)

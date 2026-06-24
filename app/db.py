@@ -4,7 +4,7 @@ import hashlib
 import json
 import secrets
 import sqlite3
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -114,6 +114,10 @@ def ensure_columns(conn: sqlite3.Connection) -> None:
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def claim_expiry_cutoff(ttl_minutes: int = 20) -> str:
+    return (datetime.now(timezone.utc) - timedelta(minutes=ttl_minutes)).isoformat(timespec="seconds")
 
 
 def work_today() -> str:
@@ -310,6 +314,39 @@ def confirm_publish_plan(conn: sqlite3.Connection) -> int:
     return int(cur.rowcount)
 
 
+def release_expired_claims(conn: sqlite3.Connection, cutoff: str = "") -> int:
+    cutoff = cutoff or claim_expiry_cutoff()
+    ts = now()
+    cur = conn.execute(
+        """
+        UPDATE source_items
+        SET publish_status = 'confirmed', publish_claimed_at = '', publish_claim_token = '',
+            publish_error = 'claim expired before result writeback', updated_at = ?
+        WHERE publish_status = 'claimed'
+          AND publish_claimed_at != ''
+          AND publish_claimed_at < ?
+        """,
+        (ts, cutoff),
+    )
+    return int(cur.rowcount)
+
+
+def release_claim(conn: sqlite3.Connection, item_id: int, claim_token: str, reason: str = "") -> bool:
+    cur = conn.execute(
+        """
+        UPDATE source_items
+        SET publish_status = 'confirmed', publish_claimed_at = '', publish_claim_token = '',
+            publish_error = ?, updated_at = ?
+        WHERE id = ?
+          AND publish_status = 'claimed'
+          AND publish_claim_token = ?
+        """,
+        (reason or "claim released by publisher", now(), item_id, claim_token),
+    )
+    conn.commit()
+    return int(cur.rowcount) == 1
+
+
 def publish_queue(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return list(
         conn.execute(
@@ -325,18 +362,21 @@ def publish_queue(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 def claim_due(conn: sqlite3.Connection, due_at: str = "", limit: int = 1) -> list[tuple[sqlite3.Row, str]]:
     limit = max(1, min(limit, 20))
     ts = now()
+    due_at = due_at or due_now()
     conn.execute("BEGIN IMMEDIATE")
     try:
+        release_expired_claims(conn)
         rows = list(
             conn.execute(
                 """
                 SELECT * FROM source_items
                 WHERE publish_status = 'confirmed'
                   AND schedule_status = 'scheduled'
+                  AND scheduled_at <= ?
                 ORDER BY scheduled_at ASC, id ASC
                 LIMIT ?
                 """,
-                (limit,),
+                (due_at, limit),
             )
         )
         claimed = []

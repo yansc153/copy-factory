@@ -201,6 +201,8 @@ class Handler(BaseHTTPRequestHandler):
             self.confirm_publish_plan_api()
         elif path == "/api/publish/claim_due":
             self.claim_due_api(payload)
+        elif path == "/api/publish/release":
+            self.release_claim_api(payload)
         elif path == "/api/publish/result":
             self.publish_result_api(payload)
         else:
@@ -269,8 +271,23 @@ class Handler(BaseHTTPRequestHandler):
         conn = db.connect(self.config.db_path)
         db.init_db(conn)
         try:
-            tasks = db.claim_due(conn, db.due_now(), int(payload.get("limit") or 1))
+            due_at = str(payload.get("now") or db.due_now())
+            tasks = db.claim_due(conn, due_at, int(payload.get("limit") or 1))
             self.send_json({"tasks": [row_to_publish_task(row, token) for row, token in tasks]})
+        finally:
+            conn.close()
+
+    def release_claim_api(self, payload: dict[str, object]) -> None:
+        item_id = int(payload.get("item_id") or 0)
+        claim_token = str(payload.get("claim_token") or "")
+        reason = str(payload.get("reason") or "")
+        conn = db.connect(self.config.db_path)
+        db.init_db(conn)
+        try:
+            if not db.release_claim(conn, item_id, claim_token, reason):
+                self.send_json({"error": "claim token mismatch or task is not claimed"}, 409)
+                return
+            self.send_json({"item": row_to_item(db.get_item(conn, item_id))})
         finally:
             conn.close()
 
