@@ -217,6 +217,78 @@ class CopyFactoryFlowTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_claim_due_api_uses_server_clock_and_rejects_bad_json(self) -> None:
+        run_sync(self.config)
+        conn = db.connect(self.config.db_path)
+        try:
+            item_id = conn.execute("SELECT id FROM source_items ORDER BY id LIMIT 1").fetchone()["id"]
+            db.save_review(conn, item_id, "future post", "approved")
+            db.save_schedule(conn, item_id, "2999-01-01T00:00:00.000Z")
+            self.assertEqual(db.confirm_publish_plan(conn), 1)
+        finally:
+            conn.close()
+
+        Handler.config = self.config
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        host, port = server.server_address
+        headers = {"Content-Type": "application/json", "Authorization": "Bearer worker-secret"}
+        try:
+            client = http.client.HTTPConnection(host, port)
+            client.request("POST", "/api/publish/claim_due", b'{"now":"9999-12-31T23:59:59.000Z","limit":1}', headers)
+            response = client.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read().decode())["tasks"], [])
+
+            client.request("POST", "/api/publish/claim_due", b"{bad-json", headers)
+            bad_json = client.getresponse()
+            payload = json.loads(bad_json.read().decode())
+            self.assertEqual(bad_json.status, 400)
+            self.assertEqual(payload["error"], "invalid_json")
+            self.assertIn("JSON", payload["message"])
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_publish_result_is_idempotent_for_same_claim_token(self) -> None:
+        run_sync(self.config)
+        conn = db.connect(self.config.db_path)
+        try:
+            item_id = conn.execute("SELECT id FROM source_items ORDER BY id LIMIT 1").fetchone()["id"]
+            db.save_review(conn, item_id, "retry result", "approved")
+            db.save_schedule(conn, item_id, "2000-01-01T00:00:00.000Z")
+            self.assertEqual(db.confirm_publish_plan(conn), 1)
+            task, token = db.claim_due(conn, limit=1)[0]
+        finally:
+            conn.close()
+
+        Handler.config = self.config
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        host, port = server.server_address
+        headers = {"Content-Type": "application/json", "Authorization": "Bearer worker-secret"}
+        try:
+            client = http.client.HTTPConnection(host, port)
+            body = json.dumps({"item_id": task["id"], "claim_token": token, "status": "published"}).encode()
+            client.request("POST", "/api/publish/result", body, headers)
+            first = client.getresponse()
+            self.assertEqual(first.status, 200)
+            first.read()
+
+            client.request("POST", "/api/publish/result", body, headers)
+            second = client.getresponse()
+            self.assertEqual(second.status, 200)
+            self.assertEqual(json.loads(second.read().decode())["item"]["status"], "published")
+
+            changed = json.dumps({"item_id": task["id"], "claim_token": token, "status": "failed", "error": "late retry"}).encode()
+            client.request("POST", "/api/publish/result", changed, headers)
+            self.assertEqual(client.getresponse().status, 409)
+        finally:
+            server.shutdown()
+            server.server_close()
+
     def test_expired_claim_is_released_and_reclaimed(self) -> None:
         run_sync(self.config)
         conn = db.connect(self.config.db_path)
@@ -264,6 +336,9 @@ class CopyFactoryFlowTest(unittest.TestCase):
             db.save_schedule(conn, item_id, "2999-01-01T00:00:00.000Z")
             self.assertEqual(db.confirm_publish_plan(conn), 1)
 
+            self.assertFalse(db.save_review(conn, item_id, "edit after confirm", "approved"))
+            self.assertFalse(db.save_schedule(conn, item_id, "2999-01-02T00:00:00.000Z"))
+            self.assertFalse(db.clear_schedule(conn, item_id))
             self.assertTrue(db.cancel_publish_confirmation(conn, item_id))
             cancelled = db.get_item(conn, item_id)
             self.assertEqual(cancelled["publish_status"], "none")

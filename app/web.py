@@ -83,7 +83,7 @@ class Handler(BaseHTTPRequestHandler):
         if valid_session(self.headers.get("Cookie"), self.config):
             return True
         if self.path.startswith("/api/"):
-            self.send_json({"error": "unauthorized"}, 401)
+            self.send_json({"error": "unauthorized", "message": "Log in or send a valid bearer token."}, 401)
         else:
             self.redirect("/login")
         return False
@@ -91,7 +91,7 @@ class Handler(BaseHTTPRequestHandler):
     def require_publish_api(self) -> bool:
         if valid_session(self.headers.get("Cookie"), self.config) or valid_publish_token(self.headers.get("Authorization"), self.config):
             return True
-        self.send_json({"error": "unauthorized"}, 401)
+        self.send_json({"error": "unauthorized", "message": "Send Authorization: Bearer <COPY_FACTORY_PUBLISH_TOKEN>."}, 401)
         return False
 
     def read_form(self) -> dict[str, str]:
@@ -186,7 +186,11 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
 
     def api_post(self, path: str) -> None:
-        payload = self.read_json()
+        try:
+            payload = self.read_json()
+        except json.JSONDecodeError:
+            self.send_json({"error": "invalid_json", "message": "Request body must be valid JSON."}, 400)
+            return
         if path == "/api/sync/preview":
             self.send_json({"result": result_to_json(preview_sync(self.config_from_payload(payload)))})
         elif path == "/api/sync/run":
@@ -285,8 +289,7 @@ class Handler(BaseHTTPRequestHandler):
         conn = db.connect(self.config.db_path)
         db.init_db(conn)
         try:
-            due_at = str(payload.get("now") or db.due_now())
-            tasks = db.claim_due(conn, due_at, int(payload.get("limit") or 1))
+            tasks = db.claim_due(conn, db.due_now(), int(payload.get("limit") or 1))
             self.send_json({"tasks": [row_to_publish_task(row, token) for row, token in tasks]})
         finally:
             conn.close()

@@ -133,19 +133,19 @@ If no task is due:
 
 Contract guarantees:
 
-- Every returned task is `confirmed`.
+- Every returned task is already `claimed`; `claim_due` does not return still-confirmed tasks.
 - Every returned task is due by the Copy Factory server clock.
 - Published, failed, and unexpired claimed tasks are never returned.
-- Browser-side cancellations or reschedules remove tasks from future claim responses until they are confirmed again.
-- A claimed task that misses the server claim TTL is released back to `confirmed` and can be claimed again.
+- Browser-side cancellation removes a confirmed task from future claim responses until it is confirmed again.
+- A claimed task that misses the 20-minute server claim TTL is released back to `confirmed` and can be claimed again.
 
 The Mac mini should not re-check `scheduled_at`. If the server returns a task, publish it or release/fail it.
 
 ### Browser Cancellation Boundary
 
-Copy Factory operators can cancel confirmation, unschedule, or reschedule a task while it is still `confirmed`.
+Copy Factory operators can cancel confirmation while a task is still `confirmed`. Editing, unscheduling, or rescheduling requires cancelling confirmation first.
 
-The downstream worker does not need a cancel endpoint. It must only trust `POST /api/publish/claim_due`; saved schedule drafts are invisible until a human explicitly enters them into the publish queue, and cancelled or rescheduled confirmations simply will not be returned. Once a task is `claimed`, ordinary browser cancellation is blocked and the worker owns the next transition: `published`, `failed`, or explicit `release`.
+The downstream worker does not need a cancel endpoint. It must only trust `POST /api/publish/claim_due`; saved schedule drafts are invisible until a human explicitly enters them into the publish queue, and cancelled confirmations simply will not be returned. Once a task is `claimed`, ordinary browser cancellation is blocked and the worker owns the next transition: `published`, `failed`, or explicit `release`.
 
 ### Release Claim
 
@@ -181,6 +181,46 @@ Content-Type: application/json
 ```
 
 `claim_token` is mandatory. It prevents a stale worker from writing to the wrong task.
+Retrying the same `item_id`, `claim_token`, `status`, and `error` is idempotent. A stale or mismatched token returns `409`.
+
+### Curl Smoke
+
+This smoke is safe for a dry run when the final result is `failed`:
+
+```bash
+export COPY_FACTORY_BASE_URL=https://hardness-content.hellopepper.work
+export COPY_FACTORY_PUBLISH_TOKEN=...
+
+curl -fsS -H "Authorization: Bearer $COPY_FACTORY_PUBLISH_TOKEN" \
+  "$COPY_FACTORY_BASE_URL/api/publish/queue"
+
+claim_json="$(curl -fsS -X POST \
+  -H "Authorization: Bearer $COPY_FACTORY_PUBLISH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"limit":1}' \
+  "$COPY_FACTORY_BASE_URL/api/publish/claim_due")"
+printf '%s\n' "$claim_json"
+
+eval "$(python3 - "$claim_json" <<'PY'
+import json, sys
+task = (json.loads(sys.argv[1]).get("tasks") or [None])[0]
+if task:
+    assert task["status"] == "claimed"
+    assert task["claim_token"]
+    assert task["copy"]
+    print(f"ITEM_ID={task['item_id']}")
+    print(f"CLAIM_TOKEN={task['claim_token']!r}")
+PY
+)"
+
+if [ -n "${ITEM_ID:-}" ]; then
+  curl -fsS -X POST \
+    -H "Authorization: Bearer $COPY_FACTORY_PUBLISH_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"item_id\":$ITEM_ID,\"claim_token\":\"$CLAIM_TOKEN\",\"status\":\"failed\",\"error\":\"test_dry_run\"}" \
+    "$COPY_FACTORY_BASE_URL/api/publish/result"
+fi
+```
 
 ## Worker Loop
 

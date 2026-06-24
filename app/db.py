@@ -262,7 +262,7 @@ def save_review(conn: sqlite3.Connection, item_id: int, edited_copy: str, status
             publish_result_at = CASE WHEN publish_status IN ('confirmed', 'failed') OR ? != 'approved' THEN '' ELSE publish_result_at END,
             publish_error = CASE WHEN publish_status IN ('confirmed', 'failed') OR ? != 'approved' THEN '' ELSE publish_error END,
             updated_at = ?
-        WHERE id = ? AND publish_status NOT IN ('claimed', 'published')
+        WHERE id = ? AND publish_status IN ('none', 'failed')
         """,
         (edited_copy, status, selected_media_url, status, status, status, status, status, status, now(), item_id),
     )
@@ -277,7 +277,7 @@ def save_schedule(conn: sqlite3.Connection, item_id: int, scheduled_at: str) -> 
         SET schedule_status = 'scheduled', scheduled_at = ?, publish_status = 'none',
             publish_confirmed_at = '', publish_claimed_at = '', publish_claim_token = '',
             publish_result_at = '', publish_error = '', updated_at = ?
-        WHERE id = ? AND publish_status IN ('none', 'failed', 'confirmed')
+        WHERE id = ? AND publish_status IN ('none', 'failed')
         """,
         (scheduled_at, now(), item_id),
     )
@@ -292,7 +292,7 @@ def clear_schedule(conn: sqlite3.Connection, item_id: int) -> bool:
         SET schedule_status = 'unscheduled', scheduled_at = '', publish_status = 'none',
             publish_confirmed_at = '', publish_claimed_at = '', publish_claim_token = '',
             publish_result_at = '', publish_error = '', updated_at = ?
-        WHERE id = ? AND publish_status IN ('none', 'failed', 'confirmed')
+        WHERE id = ? AND publish_status IN ('none', 'failed')
         """,
         (now(), item_id),
     )
@@ -434,7 +434,16 @@ def save_publish_result(conn: sqlite3.Connection, item_id: int, claim_token: str
         (status, ts, error, ts, item_id, claim_token),
     )
     conn.commit()
-    return int(cur.rowcount) == 1
+    if int(cur.rowcount) == 1:
+        return True
+    row = get_item(conn, item_id)
+    return bool(
+        row
+        and row["publish_claim_token"] == claim_token
+        and row["publish_status"] == status
+        and row["publish_result_at"]
+        and row["publish_error"] == error
+    )
 
 
 def items_for_work_date(conn: sqlite3.Connection, work_date: str = "") -> list[sqlite3.Row]:

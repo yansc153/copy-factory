@@ -16,10 +16,10 @@ test:
 	$(PYTHON) -m unittest discover -s tests -v
 
 build: install lint typecheck test
+	rm -rf dist
 	mkdir -p dist
-	cp README.md env.example Dockerfile docker-compose.yml dist/
-	mkdir -p dist/scripts
-	cp scripts/serve_with_sync.py dist/scripts/
+	cp README.md env.example Makefile Dockerfile docker-compose.yml dist/
+	cp -R app scripts dist/
 
 run:
 	$(PYTHON) -m app.web --host 127.0.0.1 --port 8000

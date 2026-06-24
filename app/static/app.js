@@ -11,6 +11,9 @@ const state = {
   sourceFilter: "all",
   searchQuery: "",
   pendingSchedules: {},
+  scheduleSaving: false,
+  scheduleSaveError: "",
+  publishConfirming: false,
   syncPhase: "",
   syncError: "",
 };
@@ -134,7 +137,7 @@ function counts(items = visibleItems()) {
 }
 
 function canMove(item) {
-  return item.review_status === "approved" && ["none", "failed", "confirmed"].includes(item.publish_status || "none");
+  return item.review_status === "approved" && ["none", "failed"].includes(item.publish_status || "none");
 }
 
 function syncBusy() {
@@ -165,7 +168,7 @@ function shell(content, side = "") {
     return `<button class="${state.view === view ? "active" : ""}" onclick="go('${view}')"><span>${label}</span></button>`;
   }).join("");
   return `
-    <aside class="nav"><div class="brand"><div class="mark">CF</div><strong>Copy Factory</strong></div>${nav}<div class="nav-card"><strong>数据同步正常</strong><p>每 30 分钟自动同步</p><button onclick="manualSync()" ${syncBusy() ? "disabled" : ""}>${syncBusy() ? "同步中" : "立即同步"}</button></div></aside>
+    <aside class="nav"><div class="brand"><div class="mark">CF</div><strong>Copy Factory</strong></div>${nav}<div class="nav-card"><strong>数据同步正常</strong><p>每 30 分钟自动同步</p><button class="${syncBusy() ? "is-busy" : ""}" onclick="manualSync()" ${syncBusy() ? "disabled" : ""}>${syncBusy() ? "同步中" : "立即同步"}</button></div></aside>
     <main class="workspace"><header class="appbar"><nav>${topNav}</nav><input class="search" type="search" value="${h(state.searchQuery)}" placeholder="搜索内容、来源或标签..." aria-label="搜索内容、来源或标签" oninput="setSearch(this.value)"><div class="user-dot">J</div></header><div class="main ${side ? "" : "no-rail"}"><section class="stage">${content}</section><aside class="rail">${side}</aside></div></main>
     <nav class="tabbar">${nav}</nav>
   `;
@@ -210,7 +213,8 @@ function itemCard(item, compact = false, context = "") {
   const observed = item.observed_at ? `抓取 ${formatApiTime(item.observed_at)}` : "";
   const published = item.published_at ? `原文 ${formatApiTime(item.published_at)}` : "";
   const timeLine = [observed, published].filter(Boolean).join(" · ");
-  return `<article class="${compact ? "mini-card" : "feed-item"} status-${h(item.publish_status || "none")}" draggable="${canMove(item)}" ondragstart="dragItem(event, ${item.id})">
+  const movable = canMove(item);
+  return `<article class="${compact ? "mini-card" : "feed-item"} status-${h(item.publish_status || "none")}" draggable="${movable}" ${movable ? `ondragstart="dragItem(event, ${item.id})"` : ""}>
     ${compact ? "" : `<div class="avatar ${sourceKind(item)}">${h(label[0]?.toUpperCase() || "C")}</div>`}
     <div class="item-body">
       <div class="item-head">
@@ -274,7 +278,7 @@ function syncView() {
   const last = runs[0];
   return shell(`<div class="topbar"><h1>同步中心</h1><p class="muted">自动同步每 30 分钟跑一次；需要马上拉新内容时点立即同步。</p></div>
     <div class="sync-grid">
-      <section class="panel span-6"><h2>当前状态</h2>${syncStatusBlock()}<div class="kv"><span>频率</span><strong>每 30 分钟</strong></div><div class="kv"><span>来源</span><strong>${(state.settings?.sources || []).map(sourceLabel).join(" / ")}</strong></div><button class="wide-btn" onclick="manualSync()" ${syncBusy() ? "disabled" : ""}>${syncBusy() ? "同步中" : "立即同步"}</button></section>
+      <section class="panel span-6"><h2>当前状态</h2>${syncStatusBlock()}<div class="kv"><span>频率</span><strong>每 30 分钟</strong></div><div class="kv"><span>来源</span><strong>${(state.settings?.sources || []).map(sourceLabel).join(" / ")}</strong></div><button class="wide-btn ${syncBusy() ? "is-busy" : ""}" onclick="manualSync()" ${syncBusy() ? "disabled" : ""}>${syncBusy() ? "同步中" : "立即同步"}</button></section>
       <section class="panel span-6"><h2>${r ? "本轮结果" : "最近同步"}</h2>${r ? resultBlock(r) : last ? runBlock(last) : `<p class="muted">还没有同步记录。</p>`}</section>
     </div>`);
 }
@@ -305,15 +309,17 @@ function runBlock(run) {
 }
 
 function scheduleView() {
-  const approved = visibleItems().filter((x) => x.review_status === "approved" && effectiveScheduleStatus(x) !== "scheduled" && !["claimed", "published"].includes(x.publish_status || "none"));
+  const approved = visibleItems().filter((x) => x.review_status === "approved" && effectiveScheduleStatus(x) !== "scheduled" && ["none", "failed"].includes(x.publish_status || "none"));
   const slots = scheduleSlots();
   const ready = confirmableItems();
   const hiddenPast = hiddenPastScheduledCount();
   const queue = publishQueueCounts();
   const pending = pendingScheduleCount();
-  const finalDisabled = hasPendingScheduleChanges() || !ready.length;
+  const hasDrafts = hasPendingScheduleChanges();
+  const finalDisabled = hasDrafts || !ready.length || state.publishConfirming;
+  const confirmLabel = state.publishConfirming ? "确认中" : hasDrafts ? "先保存草稿" : ready.length ? "进入发布队列" : "无待确认";
   return shell(`<div class="topbar schedule-top"><div><p class="eyebrow">Publish desk</p><h1>发布排期</h1><p class="muted">先保存排期草稿；确认进入发布队列后，Mac mini 可能在 1 分钟内领取。</p>${statBar()}</div></div>
-    <div class="timeline schedule-planner"><aside class="approved-pool"><div class="pool-head"><h2>待排内容</h2><span>${approved.length}</span></div>${approved.map((x) => itemCard(x, true, "pool")).join("") || `<p class="empty-note">没有待排的已通过文案。</p>`}</aside><section class="schedule-board"><div class="confirm-bar"><div><strong>${ready.length} 条已保存待确认</strong><div class="queue-metrics"><span>草稿改动 ${pending}</span><span>待发布 ${queue.confirmed}</span><span>发布中 ${queue.claimed}</span><span>已完成 ${queue.published}</span><span>失败 ${queue.failed}</span></div>${hasPendingScheduleChanges() ? `<p class="muted">有未保存排期，请先保存草稿，再进入发布队列。</p>` : ""}${hiddenPast ? `<p class="muted">已隐藏 ${hiddenPast} 条过去排期，避免误确认历史内容。</p>` : ""}</div><div class="confirm-actions"><button onclick="saveScheduleDraft()" ${pending ? "" : "disabled"}>保存排期草稿</button><button class="primary" onclick="confirmPublishPlan()" ${finalDisabled ? "disabled" : ""}>进入发布队列</button></div></div><div class="slot-grid">${slotGroups(slots).map(dayView).join("")}</div></section></div>`);
+    <div class="timeline schedule-planner"><aside class="approved-pool"><div class="pool-head"><h2>待排内容</h2><span>${approved.length}</span></div>${approved.map((x) => itemCard(x, true, "pool")).join("") || `<p class="empty-note">没有待排的已通过文案。</p>`}</aside><section class="schedule-board"><div class="confirm-bar"><div><strong>${ready.length} 条已保存待确认</strong><div class="queue-metrics"><span>草稿改动 ${pending}</span><span>待发布 ${queue.confirmed}</span><span>发布中 ${queue.claimed}</span><span>已完成 ${queue.published}</span><span>失败 ${queue.failed}</span></div>${hasDrafts ? `<p class="muted">进入发布队列已阻止：请先保存或丢弃未保存排期。</p>` : ""}${state.scheduleSaveError ? `<p class="error-note">${h(state.scheduleSaveError)}</p>` : ""}${hiddenPast ? `<p class="muted">已隐藏 ${hiddenPast} 条过去排期，避免误确认历史内容。</p>` : ""}</div><div class="confirm-actions"><button class="${state.scheduleSaving ? "is-busy" : ""}" onclick="saveScheduleDraft()" ${pending && !state.scheduleSaving ? "" : "disabled"}>${state.scheduleSaving ? "保存中" : "保存排期草稿"}</button>${pending ? `<button onclick="discardScheduleDrafts()">丢弃草稿</button>` : ""}<button class="primary ${state.publishConfirming ? "is-busy" : ""}" onclick="confirmPublishPlan()" ${finalDisabled ? "disabled" : ""}>${confirmLabel}</button></div></div><div class="slot-grid">${slotGroups(slots).map(dayView).join("")}</div></section></div>`);
 }
 
 function scheduledReady() {
@@ -512,18 +518,37 @@ function draftSchedule(id, scheduled_at) {
   const item = state.items.find((x) => x.id === id);
   if (!item || !canMove(item)) return;
   state.pendingSchedules[id] = scheduled_at;
+  state.scheduleSaveError = "";
   render();
 }
 async function saveScheduleDraft() {
+  if (!hasPendingScheduleChanges() || state.scheduleSaving) return;
+  state.scheduleSaving = true;
+  render();
   const changes = Object.entries(state.pendingSchedules);
-  for (const [id, scheduled_at] of changes) {
-    if (scheduled_at) await api(`/api/items/${id}/schedule`, { scheduled_at });
-    else await api(`/api/items/${id}/unschedule`, {});
+  try {
+    for (const [id, scheduled_at] of changes) {
+      if (scheduled_at) await api(`/api/items/${id}/schedule`, { scheduled_at });
+      else await api(`/api/items/${id}/unschedule`, {});
+    }
+    state.pendingSchedules = {};
+    await refresh();
+  } catch (err) {
+    state.scheduleSaveError = `保存失败：${err?.status || err}`;
+    render();
+  } finally {
+    state.scheduleSaving = false;
+    render();
   }
-  state.pendingSchedules = {};
-  await refresh();
 }
 async function quickSchedule(id) { draftSchedule(id, nextSlots()[0]); }
+function discardScheduleDrafts() {
+  if (!hasPendingScheduleChanges()) return;
+  if (!window.confirm("丢弃所有未保存排期草稿？")) return;
+  state.pendingSchedules = {};
+  state.scheduleSaveError = "";
+  render();
+}
 async function cancelPublish(event, id) {
   event?.stopPropagation();
   const result = await api("/api/publish/cancel", { item_id: id });
@@ -531,16 +556,29 @@ async function cancelPublish(event, id) {
   await refresh();
 }
 async function confirmPublishPlan() {
+  if (state.publishConfirming) return;
   if (hasPendingScheduleChanges()) {
-    window.alert("请先保存排期草稿，再进入发布队列。");
+    window.alert("请先保存或丢弃未保存排期，再进入发布队列。");
     return;
   }
   if (!window.confirm("进入发布队列后，Mac mini 可能在 1 分钟内领取并发布。确认继续？")) return;
-  const result = await api("/api/publish/confirm_plan", {});
-  state.publishQueue = result.tasks;
-  await refresh();
-  state.view = "schedule";
+  state.publishConfirming = true;
   render();
+  try {
+    const result = await api("/api/publish/confirm_plan", {});
+    state.publishQueue = result.tasks;
+    await refresh();
+    state.view = "schedule";
+  } finally {
+    state.publishConfirming = false;
+    render();
+  }
 }
+
+window.addEventListener("beforeunload", (event) => {
+  if (!hasPendingScheduleChanges()) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
 
 refresh().catch((err) => { $("#app").innerHTML = `<main class="panel"><h1>加载失败</h1><pre>${err}</pre></main>`; });

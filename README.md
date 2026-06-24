@@ -10,15 +10,14 @@ Mac mini downstream handoff: [docs/mac-mini-downstream-handoff.md](docs/mac-mini
 ```bash
 make install
 cp env.example .env
-export COPY_FACTORY_ENV=local
-export COPY_FACTORY_USER=admin
-export COPY_FACTORY_PASSWORD=password
-export COPY_FACTORY_SESSION_SECRET=dev-secret-change-me
+set -a
+. ./.env
+set +a
 make sync
 make run
 ```
 
-Open `http://127.0.0.1:8000` and log in with `admin / password`. The app has three main work areas:
+The app reads environment variables; it does not load `.env` by itself. Open `http://127.0.0.1:8000` and log in with the credentials from `.env`. The app has four main work areas:
 
 - Review: Twitter-like feed for generated copy, source text, and media references.
 - Daily workbench: synced items are grouped by work date, with Today / Yesterday / All filters so skipped drafts stay available without cluttering the next morning.
@@ -157,6 +156,7 @@ docker run --rm -p 8000:8000 \
   -e COPY_FACTORY_USER="$COPY_FACTORY_USER" \
   -e COPY_FACTORY_PASSWORD="$COPY_FACTORY_PASSWORD" \
   -e COPY_FACTORY_SESSION_SECRET="$COPY_FACTORY_SESSION_SECRET" \
+  -e COPY_FACTORY_PUBLISH_TOKEN="$COPY_FACTORY_PUBLISH_TOKEN" \
   -e DEEPSEEK_API_KEY_FILE=/run/secrets/deepseek_api_key \
   -v copy-factory-data:/app/data \
   copy-factory
@@ -203,6 +203,45 @@ The browser app is served by `app.web` and talks to JSON endpoints:
 - `POST /api/publish/release` bearer token or browser session; body `{"item_id":1,"claim_token":"...","reason":"chrome_unavailable"}`; returns a claimed task to `confirmed`.
 - `POST /api/publish/result` bearer token or browser session; body `{"item_id":1,"claim_token":"...","status":"published"}` or `{"item_id":1,"claim_token":"...","status":"failed","error":"..."}`.
 
+Publish API smoke:
+
+```bash
+export COPY_FACTORY_BASE_URL=http://127.0.0.1:8000
+export COPY_FACTORY_PUBLISH_TOKEN=dev-publish-token
+
+curl -fsS -H "Authorization: Bearer $COPY_FACTORY_PUBLISH_TOKEN" \
+  "$COPY_FACTORY_BASE_URL/api/publish/queue"
+
+claim_json="$(curl -fsS -X POST \
+  -H "Authorization: Bearer $COPY_FACTORY_PUBLISH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"limit":1}' \
+  "$COPY_FACTORY_BASE_URL/api/publish/claim_due")"
+printf '%s\n' "$claim_json"
+
+eval "$(python3 - "$claim_json" <<'PY'
+import json, sys
+task = (json.loads(sys.argv[1]).get("tasks") or [None])[0]
+if task:
+    assert task["status"] == "claimed"
+    assert task["claim_token"]
+    assert task["copy"]
+    print(f"ITEM_ID={task['item_id']}")
+    print(f"CLAIM_TOKEN={task['claim_token']!r}")
+PY
+)"
+
+if [ -n "${ITEM_ID:-}" ]; then
+  curl -fsS -X POST \
+    -H "Authorization: Bearer $COPY_FACTORY_PUBLISH_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"item_id\":$ITEM_ID,\"claim_token\":\"$CLAIM_TOKEN\",\"status\":\"failed\",\"error\":\"test_dry_run\"}" \
+    "$COPY_FACTORY_BASE_URL/api/publish/result"
+fi
+```
+
+`claim_due` returns tasks after changing their status from `confirmed` to `claimed`; it does not return still-confirmed work. It uses the Copy Factory server clock, so the Mac mini should not apply a second local due-time check.
+
 Publish state flow:
 
 `none -> scheduled draft -> confirmed -> claimed -> published`
@@ -211,10 +250,9 @@ Failure flow:
 
 `none -> scheduled draft -> confirmed -> claimed -> failed`
 
-Claimed tasks automatically return to `confirmed` if no result is written back before the claim TTL expires. The Mac mini can also release a claim explicitly when preflight fails.
+Claimed tasks automatically return to `confirmed` if no result is written back before the 20-minute claim TTL expires. The Mac mini can also release a claim explicitly when preflight fails. Result writes are token-guarded and idempotent for the same `item_id`, `claim_token`, `status`, and `error`; a stale or mismatched token returns `409`.
 
-Before a task is claimed, the browser can cancel confirmation and keep the scheduled slot. Rescheduling or unscheduling a confirmed item also clears publish state back to `none`, so confirmation remains an explicit final step after any time change.
-Confirmed or failed items can be edited and then reconfirmed. Claimed or published items are locked from ordinary edit/reschedule/cancel actions.
+Before a task is claimed, the browser can cancel confirmation and keep the scheduled slot. Confirmed items are locked from ordinary edit, drag, reschedule, and unschedule actions until `撤销确认` succeeds. Failed items can be edited or rescheduled and then confirmed again. Claimed or published items stay locked from ordinary edit/reschedule/cancel actions.
 
 ## What Works Now
 

@@ -65,9 +65,9 @@ Meaning:
 - `published`: Mac mini reported success.
 - `failed`: Mac mini reported failure; human can edit/reschedule/reconfirm.
 
-Before claim, a confirmed item can be cancelled, rescheduled, or unscheduled from the browser. These actions clear publish state back to `none`, so a human must confirm the plan again before Mac mini can claim it.
+Before claim, a confirmed item can be cancelled from the browser. It cannot be edited, rescheduled, or unscheduled until cancellation succeeds, so a human must confirm the plan again after any later change.
 Once an item is `claimed` or `published`, normal web edits, reschedules, and cancellations are locked.
-Claimed tasks automatically return to `confirmed` after the server claim TTL if no result is written.
+Claimed tasks automatically return to `confirmed` after the 20-minute server claim TTL if no result is written.
 
 ## Mac Mini API Contract
 
@@ -93,7 +93,8 @@ Content-Type: application/json
 ```
 
 The server decides whether `scheduled_at` is due. The Mac mini publisher must not apply its own due-time gate; if a task is returned here, it is ready to publish.
-If a browser user cancels or reschedules before claim, that task will not be returned by `claim_due` until it is confirmed again.
+If a browser user cancels before claim, that task will not be returned by `claim_due` until it is confirmed again. Rescheduling requires cancelling confirmation first.
+`claim_due` returns tasks after atomically changing them from `confirmed` to `claimed`; returned tasks are not still `confirmed`.
 
 Claim response task shape:
 
@@ -137,6 +138,45 @@ Failure:
 
 ```json
 {"item_id":123,"claim_token":"...","status":"failed","error":"reason"}
+```
+
+`claim_token` makes result writeback single-owner. Retrying the same `item_id`, `claim_token`, `status`, and `error` is idempotent; a stale or mismatched token returns `409`.
+
+Executable smoke:
+
+```bash
+export COPY_FACTORY_BASE_URL=https://hardness-content.hellopepper.work
+export COPY_FACTORY_PUBLISH_TOKEN=...
+
+curl -fsS -H "Authorization: Bearer $COPY_FACTORY_PUBLISH_TOKEN" \
+  "$COPY_FACTORY_BASE_URL/api/publish/queue"
+
+claim_json="$(curl -fsS -X POST \
+  -H "Authorization: Bearer $COPY_FACTORY_PUBLISH_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"limit":1}' \
+  "$COPY_FACTORY_BASE_URL/api/publish/claim_due")"
+printf '%s\n' "$claim_json"
+
+eval "$(python3 - "$claim_json" <<'PY'
+import json, sys
+task = (json.loads(sys.argv[1]).get("tasks") or [None])[0]
+if task:
+    assert task["status"] == "claimed"
+    assert task["claim_token"]
+    assert task["copy"]
+    print(f"ITEM_ID={task['item_id']}")
+    print(f"CLAIM_TOKEN={task['claim_token']!r}")
+PY
+)"
+
+if [ -n "${ITEM_ID:-}" ]; then
+  curl -fsS -X POST \
+    -H "Authorization: Bearer $COPY_FACTORY_PUBLISH_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"item_id\":$ITEM_ID,\"claim_token\":\"$CLAIM_TOKEN\",\"status\":\"failed\",\"error\":\"test_dry_run\"}" \
+    "$COPY_FACTORY_BASE_URL/api/publish/result"
+fi
 ```
 
 ## Deployment
