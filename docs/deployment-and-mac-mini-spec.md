@@ -6,6 +6,8 @@ Copy Factory runs on the VPS. It owns upstream sync, DeepSeek/Huajiao writing, m
 
 The Mac mini owns external posting only. It never crawls upstream feeds and never decides what should be published. It polls the VPS publish API, claims due tasks, publishes them with its own browser/session, then writes the result back.
 
+Copy Factory is the only source of truth for publish task state. The Mac mini is a stateless executor: preflight, claim, publish, write result or release.
+
 ## Upstream Sync
 
 Run sync every 30 minutes on the VPS:
@@ -64,6 +66,7 @@ Meaning:
 - `failed`: Mac mini reported failure; human can edit/reschedule/reconfirm.
 
 Once an item is `claimed` or `published`, normal web edits and reschedules are locked.
+Claimed tasks automatically return to `confirmed` after the server claim TTL if no result is written.
 
 ## Mac Mini API Contract
 
@@ -79,7 +82,7 @@ Read queue:
 GET /api/publish/queue
 ```
 
-Claim confirmed scheduled tasks:
+Claim due confirmed scheduled tasks:
 
 ```http
 POST /api/publish/claim_due
@@ -88,7 +91,7 @@ Content-Type: application/json
 {"limit":1}
 ```
 
-The response includes `scheduled_at`. The Mac mini publisher uses that field to decide when to post.
+The server decides whether `scheduled_at` is due. The Mac mini publisher must not apply its own due-time gate; if a task is returned here, it is ready to publish.
 
 Claim response task shape:
 
@@ -109,6 +112,15 @@ Claim response task shape:
 ```
 
 Mac mini should prefer `selected_media_url` when present and fall back to `media_urls`.
+
+Release a claim when the worker cannot safely publish after claiming:
+
+```http
+POST /api/publish/release
+Content-Type: application/json
+
+{"item_id":123,"claim_token":"...","reason":"chrome_unavailable"}
+```
 
 Write result:
 

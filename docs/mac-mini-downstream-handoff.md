@@ -44,6 +44,7 @@ Mac mini must not:
 - choose content on its own
 - bypass `claim_due`
 - store Copy Factory queue state locally except transient runtime state
+- decide whether `scheduled_at` is due
 - inspect browser cookies directly
 
 ## Copy Factory API
@@ -130,6 +131,28 @@ If no task is due:
 {"tasks":[]}
 ```
 
+Contract guarantees:
+
+- Every returned task is `confirmed`.
+- Every returned task is due by the Copy Factory server clock.
+- Published, failed, and unexpired claimed tasks are never returned.
+- A claimed task that misses the server claim TTL is released back to `confirmed` and can be claimed again.
+
+The Mac mini should not re-check `scheduled_at`. If the server returns a task, publish it or release/fail it.
+
+### Release Claim
+
+Use this when preflight passes claim but the worker then discovers it cannot publish safely:
+
+```http
+POST /api/publish/release
+Content-Type: application/json
+
+{"item_id":123,"claim_token":"...","reason":"chrome_unavailable"}
+```
+
+`claim_token` is mandatory. A stale or mismatched token returns `409`.
+
 ### Result Writeback
 
 Success:
@@ -158,11 +181,14 @@ Build the smallest loop first:
 
 ```text
 start
+  -> preflight Chrome/opencli health
+  -> unhealthy: exit 0 without claiming
   -> POST claim_due limit=1
   -> no tasks: exit 0
   -> one task: publish through Chrome
   -> success: POST result published
-  -> failure: POST result failed
+  -> cannot safely publish before submit: POST release
+  -> submit attempted but failed/uncertain: POST result failed
   -> exit
 ```
 
@@ -190,6 +216,7 @@ The downstream Codex session should use `chrome:control-chrome` when it needs br
 
 The worker should:
 
+- run preflight before claiming
 - claim or open the target posting page
 - verify login state from visible UI
 - paste `copy`
@@ -204,6 +231,8 @@ The worker should not:
 - export browser profile data
 - attempt password recovery
 - publish if login state is unclear
+- keep a permanent processed-items cache for Copy Factory tasks
+- skip tasks because local time thinks they are not due
 
 ## Media Handling
 
@@ -240,7 +269,8 @@ Put extra detail after the code if useful:
 
 - Claim only one task at a time.
 - Never publish a task without a fresh `claim_token`.
-- Always write `failed` after claiming if the worker cannot complete.
+- Release the claim if the worker cannot publish safely before attempting submission.
+- Write `failed` after claiming if submission was attempted but failed or is uncertain.
 - If unsure whether a post was submitted, do not retry blindly. Mark `failed` with `submit_not_confirmed`.
 - Do not run two local workers at once.
 

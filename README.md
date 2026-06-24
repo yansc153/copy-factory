@@ -31,7 +31,7 @@ Morning flow:
 2. Review generated drafts, edit today's copy, and save approved items.
 3. Drag approved items into time slots on Schedule. The browser stores UTC ISO timestamps and displays them in local time.
 4. Click "确认发布计划". The server marks scheduled approved work as confirmed queue tasks.
-5. Stop there for the local morning workflow. The Mac mini publisher claims confirmed tasks later and uses `scheduled_at` to decide when to post.
+5. Stop there for the local morning workflow. The Mac mini publisher claims confirmed tasks later; the server decides whether a task is due.
 
 Local smoke for that exact workflow:
 
@@ -198,7 +198,8 @@ The browser app is served by `app.web` and talks to JSON endpoints:
 - `POST /api/items/:id/unschedule`
 - `POST /api/publish/confirm_plan` browser session only; confirms approved and scheduled items.
 - `GET /api/publish/queue` browser session or `Authorization: Bearer <COPY_FACTORY_PUBLISH_TOKEN>`; lists confirmed/claimed/published/failed tasks.
-- `POST /api/publish/claim_due` bearer token or browser session; body `{"limit":1}`; atomically marks confirmed scheduled tasks as `claimed`, and returns `claim_token`.
+- `POST /api/publish/claim_due` bearer token or browser session; body `{"limit":1}`; atomically marks due confirmed tasks as `claimed`, and returns `claim_token`. The server only returns tasks whose `scheduled_at` is due by server clock.
+- `POST /api/publish/release` bearer token or browser session; body `{"item_id":1,"claim_token":"...","reason":"chrome_unavailable"}`; returns a claimed task to `confirmed`.
 - `POST /api/publish/result` bearer token or browser session; body `{"item_id":1,"claim_token":"...","status":"published"}` or `{"item_id":1,"claim_token":"...","status":"failed","error":"..."}`.
 
 Publish state flow:
@@ -208,6 +209,8 @@ Publish state flow:
 Failure flow:
 
 `none -> confirmed -> claimed -> failed`
+
+Claimed tasks automatically return to `confirmed` if no result is written back before the claim TTL expires. The Mac mini can also release a claim explicitly when preflight fails.
 
 Rescheduling an item clears publish state back to `none`, so confirmation remains an explicit final step.
 Confirmed or failed items can be edited and then reconfirmed. Claimed or published items are locked from ordinary edit/reschedule actions.
