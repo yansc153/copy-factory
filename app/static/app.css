@@ -124,10 +124,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 10px 14px;
-  color: #98a2b3;
+  color: var(--ink);
   background: #fbfcff;
   font-size: 13px;
 }
+.search::placeholder { color: #98a2b3; }
 .user-dot { width: 36px; height: 36px; border-radius: 50%; background: #111827; color: white; display: grid; place-items: center; font-weight: 850; }
 .main { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 320px; }
 .main.no-rail { grid-template-columns: minmax(0, 1fr); }

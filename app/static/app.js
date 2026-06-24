@@ -9,10 +9,12 @@ const state = {
   lastResult: null,
   workDate: todayKey(),
   sourceFilter: "all",
+  searchQuery: "",
   syncPhase: "",
   syncError: "",
 };
 let syncTimer = 0;
+let searchTimer = 0;
 
 const $ = (sel) => document.querySelector(sel);
 function h(value) {
@@ -73,7 +75,18 @@ function sourceLabel(value) {
 }
 
 function visibleItems() {
-  return state.sourceFilter === "all" ? state.items : state.items.filter((item) => sourceKind(item) === state.sourceFilter);
+  const bySource = state.sourceFilter === "all" ? state.items : state.items.filter((item) => sourceKind(item) === state.sourceFilter);
+  const query = state.searchQuery.trim().toLowerCase();
+  if (!query) return bySource;
+  return bySource.filter((item) => [
+    sourceLabel(sourceKind(item)),
+    item.title,
+    item.text,
+    item.generated_copy,
+    item.edited_copy,
+    item.review_status,
+    item.generation_status,
+  ].some((value) => String(value || "").toLowerCase().includes(query)));
 }
 
 function counts(items = visibleItems()) {
@@ -120,7 +133,7 @@ function shell(content, side = "") {
   }).join("");
   return `
     <aside class="nav"><div class="brand"><div class="mark">CF</div><strong>Copy Factory</strong></div>${nav}<div class="nav-card"><strong>数据同步正常</strong><p>每 30 分钟自动同步</p><button onclick="manualSync()" ${syncBusy() ? "disabled" : ""}>${syncBusy() ? "同步中" : "立即同步"}</button></div></aside>
-    <main class="workspace"><header class="appbar"><nav>${topNav}</nav><div class="search">搜索内容、来源或标签...</div><div class="user-dot">J</div></header><div class="main ${side ? "" : "no-rail"}"><section class="stage">${content}</section><aside class="rail">${side}</aside></div></main>
+    <main class="workspace"><header class="appbar"><nav>${topNav}</nav><input class="search" type="search" value="${h(state.searchQuery)}" placeholder="搜索内容、来源或标签..." aria-label="搜索内容、来源或标签" oninput="setSearch(this.value)"><div class="user-dot">J</div></header><div class="main ${side ? "" : "no-rail"}"><section class="stage">${content}</section><aside class="rail">${side}</aside></div></main>
     <nav class="tabbar">${nav}</nav>
   `;
 }
@@ -251,12 +264,40 @@ function runBlock(run) {
 function scheduleView() {
   const approved = visibleItems().filter((x) => x.review_status === "approved" && x.schedule_status !== "scheduled");
   const slots = scheduleSlots();
+  const ready = confirmableItems();
+  const hiddenPast = hiddenPastScheduledCount();
   return shell(`<div class="topbar schedule-top"><div><p class="eyebrow">Publish desk</p><h1>发布排期</h1><p class="muted">按小时排布未来 48 小时的内容，把通过的文案拖到合适时间。</p>${statBar()}</div></div>
-    <div class="timeline schedule-planner"><aside class="approved-pool"><div class="pool-head"><h2>待排内容</h2><span>${approved.length}</span></div>${approved.map((x) => itemCard(x, true, "pool")).join("") || `<p class="empty-note">没有未排期 approved 文案。</p>`}</aside><section class="schedule-board"><div class="confirm-bar"><div><strong>${scheduledReady()} 条可确认</strong><p class="muted">队列 ${state.publishQueue.length} 条，已确认 ${state.publishQueue.filter((x) => x.status === "confirmed").length} 条。</p></div><button class="primary" onclick="confirmPublishPlan()">确认发布计划</button></div><div class="slot-grid">${slotGroups(slots).map(dayView).join("")}</div></section></div>`);
+    <div class="timeline schedule-planner"><aside class="approved-pool"><div class="pool-head"><h2>待排内容</h2><span>${approved.length}</span></div>${approved.map((x) => itemCard(x, true, "pool")).join("") || `<p class="empty-note">没有未排期 approved 文案。</p>`}</aside><section class="schedule-board"><div class="confirm-bar"><div><strong>${ready.length} 条可确认</strong><p class="muted">当前视图未来 48 小时；发布队列总计 ${state.publishQueue.length} 条，已确认 ${state.publishQueue.filter((x) => x.status === "confirmed").length} 条。</p>${hiddenPast ? `<p class="muted">已隐藏 ${hiddenPast} 条过去排期，避免误确认历史内容。</p>` : ""}</div><button class="primary" onclick="confirmPublishPlan()" ${ready.length ? "" : "disabled"}>确认发布计划</button></div><div class="slot-grid">${slotGroups(slots).map(dayView).join("")}</div></section></div>`);
 }
 
 function scheduledReady() {
-  return state.items.filter((x) => x.review_status === "approved" && x.schedule_status === "scheduled" && ["none", "failed"].includes(x.publish_status)).length;
+  return confirmableItems().length;
+}
+
+function planningWindowStart() {
+  return new Date(nextSlots()[0]).getTime();
+}
+
+function planningWindowEnd() {
+  return planningWindowStart() + 48 * 60 * 60 * 1000;
+}
+
+function inPlanningWindow(value) {
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) && time >= planningWindowStart() && time < planningWindowEnd();
+}
+
+function confirmableItems() {
+  return visibleItems().filter((x) => (
+    x.review_status === "approved" &&
+    x.schedule_status === "scheduled" &&
+    ["none", "failed"].includes(x.publish_status || "none") &&
+    inPlanningWindow(x.scheduled_at)
+  ));
+}
+
+function hiddenPastScheduledCount() {
+  return visibleItems().filter((x) => x.scheduled_at && !inPlanningWindow(x.scheduled_at)).length;
 }
 
 function slotView(slot) {
@@ -300,8 +341,9 @@ function nextSlots() {
 }
 
 function scheduleSlots() {
+  const windowedScheduled = visibleItems().filter((x) => x.scheduled_at && inPlanningWindow(x.scheduled_at)).map((x) => x.scheduled_at);
   return [...new Set([
-    ...visibleItems().filter((x) => x.scheduled_at).map((x) => x.scheduled_at),
+    ...windowedScheduled,
     ...nextSlots(),
   ])].sort((a, b) => new Date(a) - new Date(b));
 }
@@ -323,6 +365,18 @@ async function refresh() { await load(); render(); }
 function render() {
   const views = { review: reviewView, editor: editorView, sync: syncView, schedule: scheduleView, settings: settingsView };
   $("#app").innerHTML = views[state.view]();
+}
+function setSearch(value) {
+  state.searchQuery = value;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    render();
+    const search = $(".search");
+    if (search) {
+      search.focus();
+      search.setSelectionRange(search.value.length, search.value.length);
+    }
+  }, 120);
 }
 async function go(view) { state.view = view; await refresh(); }
 async function setWorkDate(value) { state.workDate = value; await refresh(); }
