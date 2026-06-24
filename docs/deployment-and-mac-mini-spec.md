@@ -59,8 +59,8 @@ Meaning:
 
 - `draft`: generated, waiting for human review.
 - `approved`: human accepted it for possible publishing.
-- `scheduled`: human assigned a target time.
-- `confirmed`: human clicked Confirm Publish Plan; Mac mini may claim/export it.
+- `scheduled`: human saved a target time as a schedule draft; Mac mini cannot claim it yet.
+- `confirmed`: human clicked Enter Publish Queue; Mac mini may claim/export it on the next due polling loop.
 - `claimed`: Mac mini has locked the task.
 - `published`: Mac mini reported success.
 - `failed`: Mac mini reported failure; human can edit/reschedule/reconfirm.

@@ -145,7 +145,7 @@ The Mac mini should not re-check `scheduled_at`. If the server returns a task, p
 
 Copy Factory operators can cancel confirmation, unschedule, or reschedule a task while it is still `confirmed`.
 
-The downstream worker does not need a cancel endpoint. It must only trust `POST /api/publish/claim_due`; if a human cancels before the scheduled time, the task simply will not be returned. Once a task is `claimed`, ordinary browser cancellation is blocked and the worker owns the next transition: `published`, `failed`, or explicit `release`.
+The downstream worker does not need a cancel endpoint. It must only trust `POST /api/publish/claim_due`; saved schedule drafts are invisible until a human explicitly enters them into the publish queue, and cancelled or rescheduled confirmations simply will not be returned. Once a task is `claimed`, ordinary browser cancellation is blocked and the worker owns the next transition: `published`, `failed`, or explicit `release`.
 
 ### Release Claim
 

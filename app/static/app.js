@@ -10,6 +10,7 @@ const state = {
   workDate: todayKey(),
   sourceFilter: "all",
   searchQuery: "",
+  pendingSchedules: {},
   syncPhase: "",
   syncError: "",
 };
@@ -101,13 +102,33 @@ function visibleItems() {
   ].some((value) => String(value || "").toLowerCase().includes(query)));
 }
 
+function hasPendingSchedule(item) {
+  return Object.prototype.hasOwnProperty.call(state.pendingSchedules, item.id);
+}
+
+function effectiveScheduledAt(item) {
+  return hasPendingSchedule(item) ? state.pendingSchedules[item.id] : item.scheduled_at;
+}
+
+function effectiveScheduleStatus(item) {
+  return effectiveScheduledAt(item) ? "scheduled" : "unscheduled";
+}
+
+function pendingScheduleCount() {
+  return Object.keys(state.pendingSchedules).length;
+}
+
+function hasPendingScheduleChanges() {
+  return pendingScheduleCount() > 0;
+}
+
 function counts(items = visibleItems()) {
   return {
     all: items.length,
     draft: items.filter((x) => x.review_status === "draft").length,
     approved: items.filter((x) => x.review_status === "approved").length,
     rejected: items.filter((x) => x.review_status === "rejected").length,
-    scheduled: items.filter((x) => x.schedule_status === "scheduled").length,
+    scheduled: items.filter((x) => effectiveScheduleStatus(x) === "scheduled").length,
     confirmed: items.filter((x) => x.publish_status === "confirmed").length,
   };
 }
@@ -183,7 +204,8 @@ function mediaGrid(item) {
 
 function itemCard(item, compact = false, context = "") {
   const copy = (item.edited_copy || item.generated_copy || item.text || "").slice(0, compact ? 90 : 280);
-  const scheduled = item.scheduled_at ? formatSlot(item.scheduled_at) : "";
+  const scheduledAt = effectiveScheduledAt(item);
+  const scheduled = scheduledAt ? formatSlot(scheduledAt) : "";
   const label = sourceLabel(sourceKind(item));
   const observed = item.observed_at ? `抓取 ${formatApiTime(item.observed_at)}` : "";
   const published = item.published_at ? `原文 ${formatApiTime(item.published_at)}` : "";
@@ -196,13 +218,14 @@ function itemCard(item, compact = false, context = "") {
         <span class="item-title">${h(item.title || "Untitled")}</span>
         <span class="pill ${item.review_status}">${h(reviewStatusLabel(item.review_status))}</span>
         <span class="pill">${h(generationStatusLabel(item.generation_status))}</span>
-        ${item.schedule_status === "scheduled" ? `<span class="pill approved">${h(scheduled)}</span>` : ""}
+        ${scheduledAt ? `<span class="pill approved">${h(scheduled)}</span>` : ""}
+        ${hasPendingSchedule(item) ? `<span class="pill pending">未保存</span>` : ""}
         ${item.publish_status && item.publish_status !== "none" ? `<span class="pill publish">${h(publishStatusLabel(item.publish_status))}</span>` : ""}
       </div>
       ${selectedMedia(item) ? `<img class="selected-media ${compact ? "compact" : ""}" src="${h(selectedMedia(item))}" alt="选中配图">` : ""}
       <p class="copy">${h(copy)}</p>
       ${compact ? "" : mediaGrid(item)}
-      ${compact && context === "pool" ? `<div class="actions"><button onclick="quickSchedule(${item.id})">排到下一槽</button></div>` : compact ? "" : `<div class="actions">
+      ${compact && context === "pool" ? poolScheduleActions(item) : compact ? "" : `<div class="actions">
         <button class="primary" onclick="openItem(${item.id})">编辑文案</button>
         <button onclick="quickReview(${item.id}, 'approved')">批准</button>
         <button onclick="quickReview(${item.id}, 'rejected')" class="danger">拒绝</button>
@@ -210,6 +233,14 @@ function itemCard(item, compact = false, context = "") {
       </div>`}
     </div>
   </article>`;
+}
+
+function poolScheduleActions(item) {
+  return `<div class="actions schedule-picker"><select aria-label="选择发布时间" onchange="draftSchedule(${item.id}, this.value)"><option value="">选择时间</option>${slotOptions()}</select><button onclick="quickSchedule(${item.id})">排到下一槽</button></div>`;
+}
+
+function slotOptions(selected = "") {
+  return nextSlots().map((slot) => `<option value="${h(slot)}" ${slot === selected ? "selected" : ""}>${h(formatSlot(slot))}</option>`).join("");
 }
 
 function reviewView() {
@@ -233,7 +264,7 @@ function editorView() {
     <div class="editor">
       <section class="source-pane"><h1>${h(item.title)}</h1><p class="muted">${h(item.source)} · 抓取 ${h(formatApiTime(item.observed_at))} · 原文 ${h(formatApiTime(item.published_at))} · <a href="${h(item.url)}" target="_blank">原文链接</a></p><h2>原文</h2><pre>${h(item.text)}</pre><h2>图片引用</h2>${mediaGrid(item)}</section>
       <section class="edit-pane"><h2>生成文案</h2><textarea id="copy">${h(item.edited_copy || item.generated_copy)}</textarea><h2>选择配图</h2>${mediaChoices}<div class="form-grid"><button class="wide-btn" onclick="saveReview(${item.id}, 'draft')">保存草稿</button><button class="wide-btn" onclick="saveReview(${item.id}, 'approved')">批准</button><button class="small-btn danger" onclick="saveReview(${item.id}, 'rejected')">拒绝</button><button class="small-btn" onclick="go('schedule')">去排期</button></div><p class="muted">生成状态：${h(item.generation_status)} ${h(item.generation_error || "")}</p></section>
-      <section class="preview-pane"><h2>预览</h2><div class="post-preview"><div class="preview-avatar">CF</div><strong>Copy Factory</strong><p>${h(item.edited_copy || item.generated_copy)}</p>${selectedMedia(item) ? `<img src="${h(selectedMedia(item))}" alt="预览配图">` : ""}</div><label>发布时间<input value="${h(formatSlot(item.scheduled_at || nextSlots()[0]))}" disabled></label></section>
+      <section class="preview-pane"><h2>预览</h2><div class="post-preview"><div class="preview-avatar">CF</div><strong>Copy Factory</strong><p>${h(item.edited_copy || item.generated_copy)}</p>${selectedMedia(item) ? `<img src="${h(selectedMedia(item))}" alt="预览配图">` : ""}</div><label>发布时间<input value="${h(formatSlot(effectiveScheduledAt(item) || nextSlots()[0]))}" disabled></label></section>
     </div>`);
 }
 
@@ -274,13 +305,15 @@ function runBlock(run) {
 }
 
 function scheduleView() {
-  const approved = visibleItems().filter((x) => x.review_status === "approved" && x.schedule_status !== "scheduled");
+  const approved = visibleItems().filter((x) => x.review_status === "approved" && effectiveScheduleStatus(x) !== "scheduled" && !["claimed", "published"].includes(x.publish_status || "none"));
   const slots = scheduleSlots();
   const ready = confirmableItems();
   const hiddenPast = hiddenPastScheduledCount();
   const queue = publishQueueCounts();
-  return shell(`<div class="topbar schedule-top"><div><p class="eyebrow">Publish desk</p><h1>发布排期</h1><p class="muted">未来 48 小时预约发布；未领取前可以撤销确认或改期。</p>${statBar()}</div></div>
-    <div class="timeline schedule-planner"><aside class="approved-pool"><div class="pool-head"><h2>待排内容</h2><span>${approved.length}</span></div>${approved.map((x) => itemCard(x, true, "pool")).join("") || `<p class="empty-note">没有待排的已通过文案。</p>`}</aside><section class="schedule-board"><div class="confirm-bar"><div><strong>${ready.length} 条待确认</strong><div class="queue-metrics"><span>待发布 ${queue.confirmed}</span><span>发布中 ${queue.claimed}</span><span>已完成 ${queue.published}</span><span>失败 ${queue.failed}</span></div>${hiddenPast ? `<p class="muted">已隐藏 ${hiddenPast} 条过去排期，避免误确认历史内容。</p>` : ""}</div><button class="primary" onclick="confirmPublishPlan()" ${ready.length ? "" : "disabled"}>确认发布计划</button></div><div class="slot-grid">${slotGroups(slots).map(dayView).join("")}</div></section></div>`);
+  const pending = pendingScheduleCount();
+  const finalDisabled = hasPendingScheduleChanges() || !ready.length;
+  return shell(`<div class="topbar schedule-top"><div><p class="eyebrow">Publish desk</p><h1>发布排期</h1><p class="muted">先保存排期草稿；确认进入发布队列后，Mac mini 可能在 1 分钟内领取。</p>${statBar()}</div></div>
+    <div class="timeline schedule-planner"><aside class="approved-pool"><div class="pool-head"><h2>待排内容</h2><span>${approved.length}</span></div>${approved.map((x) => itemCard(x, true, "pool")).join("") || `<p class="empty-note">没有待排的已通过文案。</p>`}</aside><section class="schedule-board"><div class="confirm-bar"><div><strong>${ready.length} 条已保存待确认</strong><div class="queue-metrics"><span>草稿改动 ${pending}</span><span>待发布 ${queue.confirmed}</span><span>发布中 ${queue.claimed}</span><span>已完成 ${queue.published}</span><span>失败 ${queue.failed}</span></div>${hasPendingScheduleChanges() ? `<p class="muted">有未保存排期，请先保存草稿，再进入发布队列。</p>` : ""}${hiddenPast ? `<p class="muted">已隐藏 ${hiddenPast} 条过去排期，避免误确认历史内容。</p>` : ""}</div><div class="confirm-actions"><button onclick="saveScheduleDraft()" ${pending ? "" : "disabled"}>保存排期草稿</button><button class="primary" onclick="confirmPublishPlan()" ${finalDisabled ? "disabled" : ""}>进入发布队列</button></div></div><div class="slot-grid">${slotGroups(slots).map(dayView).join("")}</div></section></div>`);
 }
 
 function scheduledReady() {
@@ -303,14 +336,14 @@ function inPlanningWindow(value) {
 function confirmableItems() {
   return visibleItems().filter((x) => (
     x.review_status === "approved" &&
-    x.schedule_status === "scheduled" &&
+    effectiveScheduleStatus(x) === "scheduled" &&
     ["none", "failed"].includes(x.publish_status || "none") &&
-    inPlanningWindow(x.scheduled_at)
+    inPlanningWindow(effectiveScheduledAt(x))
   ));
 }
 
 function hiddenPastScheduledCount() {
-  return visibleItems().filter((x) => x.scheduled_at && !inPlanningWindow(x.scheduled_at)).length;
+  return visibleItems().filter((x) => effectiveScheduledAt(x) && !inPlanningWindow(effectiveScheduledAt(x))).length;
 }
 
 function publishQueueCounts() {
@@ -323,7 +356,7 @@ function publishQueueCounts() {
 }
 
 function slotView(slot) {
-  const items = visibleItems().filter((x) => x.scheduled_at === slot);
+  const items = visibleItems().filter((x) => effectiveScheduledAt(x) === slot);
   const parts = formatSlotParts(slot);
   return `<div class="slot" ondragover="allowDrop(event)" ondragleave="event.currentTarget.classList.remove('dragover')" ondrop="dropItem(event, '${slot}')"><time>${parts.time}</time><div class="slot-drop">${items.map(slotItem).join("") || `<span>空档</span>`}</div></div>`;
 }
@@ -376,7 +409,7 @@ function nextSlots() {
 }
 
 function scheduleSlots() {
-  const windowedScheduled = visibleItems().filter((x) => x.scheduled_at && inPlanningWindow(x.scheduled_at)).map((x) => x.scheduled_at);
+  const windowedScheduled = visibleItems().map(effectiveScheduledAt).filter((scheduledAt) => scheduledAt && inPlanningWindow(scheduledAt));
   return [...new Set([
     ...windowedScheduled,
     ...nextSlots(),
@@ -464,8 +497,7 @@ function allowDrop(event) { event.preventDefault(); event.currentTarget.classLis
 async function dropItem(event, scheduled_at) {
   event.preventDefault();
   event.currentTarget.classList.remove("dragover");
-  await api(`/api/items/${event.dataTransfer.getData("text/plain")}/schedule`, { scheduled_at });
-  await refresh();
+  draftSchedule(Number(event.dataTransfer.getData("text/plain")), scheduled_at);
 }
 async function unschedule(event, id) {
   event?.stopPropagation();
@@ -474,10 +506,24 @@ async function unschedule(event, id) {
     ? "移出排期会同时撤销发布确认。确定移出？"
     : "确定把这条内容移出排期？";
   if (!window.confirm(message)) return;
-  await api(`/api/items/${id}/unschedule`, {});
+  draftSchedule(id, "");
+}
+function draftSchedule(id, scheduled_at) {
+  const item = state.items.find((x) => x.id === id);
+  if (!item || !canMove(item)) return;
+  state.pendingSchedules[id] = scheduled_at;
+  render();
+}
+async function saveScheduleDraft() {
+  const changes = Object.entries(state.pendingSchedules);
+  for (const [id, scheduled_at] of changes) {
+    if (scheduled_at) await api(`/api/items/${id}/schedule`, { scheduled_at });
+    else await api(`/api/items/${id}/unschedule`, {});
+  }
+  state.pendingSchedules = {};
   await refresh();
 }
-async function quickSchedule(id) { await api(`/api/items/${id}/schedule`, { scheduled_at: nextSlots()[0] }); await refresh(); }
+async function quickSchedule(id) { draftSchedule(id, nextSlots()[0]); }
 async function cancelPublish(event, id) {
   event?.stopPropagation();
   const result = await api("/api/publish/cancel", { item_id: id });
@@ -485,6 +531,11 @@ async function cancelPublish(event, id) {
   await refresh();
 }
 async function confirmPublishPlan() {
+  if (hasPendingScheduleChanges()) {
+    window.alert("请先保存排期草稿，再进入发布队列。");
+    return;
+  }
+  if (!window.confirm("进入发布队列后，Mac mini 可能在 1 分钟内领取并发布。确认继续？")) return;
   const result = await api("/api/publish/confirm_plan", {});
   state.publishQueue = result.tasks;
   await refresh();

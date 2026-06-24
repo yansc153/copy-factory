@@ -254,6 +254,7 @@ h2 { margin: 0; font-size: 17px; line-height: 1.2; letter-spacing: 0; }
 .approved { color: #097245; background: #effcf6; border-color: #b9f2d4; }
 .rejected { color: #a71919; background: #fff1f1; border-color: #ffd0d0; }
 .publish { color: #7a4b00; background: #fff8e8; border-color: #f6d48a; }
+.pending { color: #3451a4; background: #eef3ff; border-color: #c8d6ff; }
 .copy {
   white-space: pre-wrap;
   line-height: 1.7;
@@ -490,10 +491,17 @@ select, input {
 }
 .timeline { display: grid; grid-template-columns: 320px minmax(0, 1fr); min-height: calc(100vh - 132px); background: #fbfcff; }
 .schedule-top { background: linear-gradient(180deg, rgba(248,251,255,.98), rgba(241,246,252,.94)); }
-.schedule-planner { grid-template-columns: 340px minmax(0, 1fr); background: #eef3f8; }
+.schedule-planner {
+  grid-template-columns: 340px minmax(0, 1fr);
+  height: calc(100vh - 292px);
+  min-height: 540px;
+  overflow: hidden;
+  background: #eef3f8;
+}
 .approved-pool {
   border-right: 1px solid var(--line);
   padding: 18px;
+  overflow-y: auto;
   background: #f9fbfd;
 }
 .pool-head {
@@ -529,6 +537,22 @@ select, input {
   background: #ffffff;
 }
 .confirm-bar p { margin: 4px 0 0; }
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.confirm-actions button {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 780;
+  white-space: nowrap;
+}
 .queue-metrics {
   display: flex;
   gap: 8px;
@@ -544,7 +568,7 @@ select, input {
   font-size: 12px;
   font-weight: 760;
 }
-.schedule-board { min-width: 0; }
+.schedule-board { min-width: 0; overflow-y: auto; }
 .slot-grid {
   padding: 18px;
   display: grid;
@@ -672,6 +696,23 @@ select, input {
   line-height: 1.45;
 }
 .mini-card .actions { margin-top: 8px; }
+.schedule-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.schedule-picker select {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #ffffff;
+  color: var(--ink);
+  font-weight: 720;
+}
+.schedule-picker button {
+  width: 100%;
+}
 .slot-actions {
   display: flex;
   gap: 8px;
@@ -719,6 +760,10 @@ select, input {
   .avatar { display: none; }
   .topbar { padding: 18px 14px; }
   h1 { font-size: 26px; }
+  .schedule-planner { height: auto; min-height: 0; overflow: visible; }
+  .approved-pool, .schedule-board { overflow: visible; }
+  .confirm-actions { justify-content: stretch; }
+  .confirm-actions button { width: 100%; }
   .slot-grid { grid-template-columns: 1fr; overflow: visible; padding: 14px; }
   .approved-pool { border-right: 0; border-bottom: 1px solid var(--line); }
   .tabbar {
