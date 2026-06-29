@@ -30,6 +30,7 @@ Current app behavior:
 - Dedupes in SQLite by source id, URL, and content hash.
 - Stores new items under the local `work_date`, so the morning workbench stays clean.
 - Sends new items through `huajiao-finance-writer` plus DeepSeek when a key is configured.
+- For newly generated items with no upstream `media_urls`, optionally searches Brave Search Image API and stores up to 3 validated local candidates under `/media/google/...`.
 
 Morning use:
 
@@ -196,6 +197,7 @@ Production secrets:
 - `COPY_FACTORY_PUBLISH_TOKEN` or `COPY_FACTORY_PUBLISH_TOKEN_FILE`
 - `NEWS_HARNESS_EXPORT_TOKEN` or `NEWS_HARNESS_EXPORT_TOKEN_FILE`
 - `DEEPSEEK_API_KEY` or `DEEPSEEK_API_KEY_FILE`
+- `BRAVE_SEARCH_API_KEY` if automatic image candidates are enabled
 
 ## What Not To Build Yet
 
@@ -203,4 +205,4 @@ Production secrets:
 - No Mac mini publisher in this repo.
 - No browser cookies on the VPS.
 - No queue service until SQLite locking is actually insufficient.
-- No image downloading/caching. Pass upstream `image_refs` / URLs through.
+- No separate gallery, similarity ranking, copyright workflow, or image moderation system. Image candidates are only a small fallback for drafts that arrive without upstream images.

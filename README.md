@@ -52,6 +52,16 @@ make morning-smoke
 
 No package install is required. The app uses Python standard library only.
 
+## Brave Search Image Candidates
+
+For newly generated drafts with no upstream `media_urls`, Copy Factory can fetch up to 3 candidate images through Brave Search Image API. Set this variable in the environment:
+
+```bash
+BRAVE_SEARCH_API_KEY=
+```
+
+The app does not crawl image result pages and does not generate images. It saves only candidates that pass size and dimension checks under `data/media/google/` using the existing local `/media/google/...` URL prefix, writes those URLs into the existing `media_urls` array, and defaults `selected_media_url` to the first candidate. If credentials are missing or Brave/downloads fail, draft generation continues without images. The review page can rerun the search with "重新找图"; original upstream images are preserved.
+
 Real DeepSeek writing smoke:
 
 ```bash
@@ -112,6 +122,10 @@ Required for production:
 - `COPY_FACTORY_SESSION_SECRET`
 - `COPY_FACTORY_PUBLISH_TOKEN` or `COPY_FACTORY_PUBLISH_TOKEN_FILE`
 - `DEEPSEEK_API_KEY` or `DEEPSEEK_API_KEY_FILE`
+
+Optional for no-image drafts:
+
+- `BRAVE_SEARCH_API_KEY`
 
 Local/test may omit DeepSeek credentials and will use deterministic fake writing. Production refuses generation without a key.
 

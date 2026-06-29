@@ -243,6 +243,28 @@ def save_generation(conn: sqlite3.Connection, item_id: int, copy: str, error: st
     conn.commit()
 
 
+def replace_search_media(conn: sqlite3.Connection, item_id: int, search_urls: list[str]) -> bool:
+    row = get_item(conn, item_id)
+    if not row:
+        return False
+    existing = json.loads(row["media_urls"])
+    originals = [url for url in existing if not (isinstance(url, str) and url.startswith("/media/google/"))]
+    media_urls = originals + search_urls
+    selected = search_urls[0] if search_urls else row["selected_media_url"]
+    if selected and selected not in media_urls:
+        selected = media_urls[0] if media_urls else ""
+    conn.execute(
+        """
+        UPDATE source_items
+        SET media_urls = ?, selected_media_url = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (json.dumps(media_urls, ensure_ascii=False), selected, now(), item_id),
+    )
+    conn.commit()
+    return True
+
+
 def save_review(conn: sqlite3.Connection, item_id: int, edited_copy: str, status: str, selected_media_url: str | None = None) -> bool:
     if status not in {"draft", "approved", "rejected"}:
         raise ValueError("status must be draft, approved, or rejected")

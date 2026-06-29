@@ -27,6 +27,7 @@ Copy Factory VPS owns:
 - review decisions
 - schedule decisions
 - publish queue state
+- optional local Brave Search image candidates for no-image drafts
 - atomic task claiming
 - result storage
 

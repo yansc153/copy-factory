@@ -16,6 +16,7 @@ const state = {
   publishConfirming: false,
   syncPhase: "",
   syncError: "",
+  refindingMedia: false,
 };
 let syncTimer = 0;
 let searchTimer = 0;
@@ -267,7 +268,7 @@ function editorView() {
   return shell(`<div class="topbar editor-title"><button class="small-btn" onclick="go('review')">返回列表</button><h1>编辑文案</h1><span class="pill ${item.review_status}">${item.review_status}</span></div>
     <div class="editor">
       <section class="source-pane"><h1>${h(item.title)}</h1><p class="muted">${h(item.source)} · 抓取 ${h(formatApiTime(item.observed_at))} · 原文 ${h(formatApiTime(item.published_at))} · <a href="${h(item.url)}" target="_blank">原文链接</a></p><h2>原文</h2><pre>${h(item.text)}</pre><h2>图片引用</h2>${mediaGrid(item)}</section>
-      <section class="edit-pane"><h2>生成文案</h2><textarea id="copy">${h(item.edited_copy || item.generated_copy)}</textarea><h2>选择配图</h2>${mediaChoices}<div class="form-grid"><button class="wide-btn" onclick="saveReview(${item.id}, 'draft')">保存草稿</button><button class="wide-btn" onclick="saveReview(${item.id}, 'approved')">批准</button><button class="small-btn danger" onclick="saveReview(${item.id}, 'rejected')">拒绝</button><button class="small-btn" onclick="go('schedule')">去排期</button></div><p class="muted">生成状态：${h(item.generation_status)} ${h(item.generation_error || "")}</p></section>
+      <section class="edit-pane"><h2>生成文案</h2><textarea id="copy">${h(item.edited_copy || item.generated_copy)}</textarea><div class="media-heading"><h2>选择配图</h2><button class="small-btn" onclick="refindMedia(${item.id})" ${state.refindingMedia ? "disabled" : ""}>${state.refindingMedia ? "查找中" : "重新找图"}</button></div>${mediaChoices}<div class="form-grid"><button class="wide-btn" onclick="saveReview(${item.id}, 'draft')">保存草稿</button><button class="wide-btn" onclick="saveReview(${item.id}, 'approved')">批准</button><button class="small-btn danger" onclick="saveReview(${item.id}, 'rejected')">拒绝</button><button class="small-btn" onclick="go('schedule')">去排期</button></div><p class="muted">生成状态：${h(item.generation_status)} ${h(item.generation_error || "")}</p></section>
       <section class="preview-pane"><h2>预览</h2><div class="post-preview"><div class="preview-avatar">CF</div><strong>Copy Factory</strong><p>${h(item.edited_copy || item.generated_copy)}</p>${selectedMedia(item) ? `<img src="${h(selectedMedia(item))}" alt="预览配图">` : ""}</div><label>发布时间<input value="${h(formatSlot(effectiveScheduledAt(item) || nextSlots()[0]))}" disabled></label></section>
     </div>`);
 }
@@ -397,7 +398,7 @@ function dayView(group) {
 
 function settingsView() {
   return shell(`<div class="topbar"><h1>部署与设置</h1><p class="muted">一屏看清楚本地工作台能不能上公网。</p></div><div class="sync-grid">
-    <section class="panel span-6"><h2>运行状态</h2><div class="kv"><span>SQLite</span><strong>${state.settings?.db_path}</strong></div><div class="kv"><span>来源</span><strong>${(state.settings?.sources || []).join(",")}</strong></div><div class="kv"><span>Export token</span><strong>${state.settings?.has_export_token ? "ok" : "missing"}</strong></div><div class="kv"><span>DeepSeek</span><strong>${state.settings?.has_deepseek_key ? "ok" : "fake/local"}</strong></div></section>
+    <section class="panel span-6"><h2>运行状态</h2><div class="kv"><span>SQLite</span><strong>${state.settings?.db_path}</strong></div><div class="kv"><span>来源</span><strong>${(state.settings?.sources || []).join(",")}</strong></div><div class="kv"><span>Export token</span><strong>${state.settings?.has_export_token ? "ok" : "missing"}</strong></div><div class="kv"><span>DeepSeek</span><strong>${state.settings?.has_deepseek_key ? "ok" : "fake/local"}</strong></div><div class="kv"><span>Brave Search</span><strong>${state.settings?.has_image_search_key ? "ok" : "missing"}</strong></div></section>
     <section class="panel span-6"><h2>部署命令</h2><pre>python3 -m app.web --host 0.0.0.0 --port 8000\n*/30 * * * * python3 scripts/sync_once.py</pre></section>
   </div>`);
 }
@@ -466,6 +467,15 @@ async function quickReview(id, status) {
   const item = state.items.find((x) => x.id === id);
   await api(`/api/items/${id}/review`, { edited_copy: item.edited_copy || item.generated_copy, status, selected_media_url: selectedMedia(item) });
   await refresh();
+}
+async function refindMedia(id) {
+  state.refindingMedia = true;
+  render();
+  const result = await api(`/api/items/${id}/refind_media`, {});
+  state.selected = result.item;
+  state.items = state.items.map((item) => item.id === id ? result.item : item);
+  state.refindingMedia = false;
+  render();
 }
 function syncPayload() { return { limit: Number($("#limit")?.value || state.settings?.export_limit || 10), since: $("#since")?.value || "", until: $("#until")?.value || "" }; }
 async function previewSync() { state.lastResult = (await api("/api/sync/preview", syncPayload())).result; await refresh(); state.view = "sync"; render(); }
@@ -574,6 +584,29 @@ async function confirmPublishPlan() {
     render();
   }
 }
+
+Object.assign(window, {
+  cancelPublish,
+  confirmPublishPlan,
+  discardScheduleDrafts,
+  draftSchedule,
+  dragItem,
+  dropItem,
+  go,
+  manualSync,
+  openItem,
+  previewSync,
+  quickReview,
+  quickSchedule,
+  refindMedia,
+  runSync,
+  saveReview,
+  saveScheduleDraft,
+  setSearch,
+  setSourceFilter,
+  setWorkDate,
+  unschedule,
+});
 
 window.addEventListener("beforeunload", (event) => {
   if (!hasPendingScheduleChanges()) return;

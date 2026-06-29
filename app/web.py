@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from app import db, writer
+from app import db, media_search, writer
 from app.config import Config
 from app.sync import preview_sync, run_sync
 
@@ -72,6 +72,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def send_media(self, name: str) -> None:
+        root = media_search.MEDIA_DIR.resolve()
+        path = (root / name).resolve()
+        if not str(path).startswith(str(root)) or not path.exists():
+            self.send_error(404)
+            return
+        data = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def redirect(self, path: str, headers: dict[str, str] | None = None) -> None:
         self.send_response(303)
         self.send_header("Location", path)
@@ -115,6 +128,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path.startswith("/static/"):
             if path == "/static/app.css" or self.require_login():
                 self.send_static(path.removeprefix("/static/"))
+        elif path.startswith("/media/google/"):
+            if self.require_login():
+                self.send_media(path.removeprefix("/media/google/"))
         elif path.startswith("/api/"):
             if (path.startswith("/api/publish/") and self.require_publish_api()) or (
                 not path.startswith("/api/publish/") and self.require_login()
@@ -174,6 +190,8 @@ class Handler(BaseHTTPRequestHandler):
                         "export_limit": self.config.export_limit,
                         "has_export_token": bool(self.config.news_harness_token()),
                         "has_deepseek_key": writer.has_deepseek_key(),
+                        "has_image_search_key": media_search.search_configured(),
+                        "image_search_provider": "brave",
                         "has_publish_token": bool(self.config.mac_mini_token()),
                         "runs": [row_to_run(row) for row in db.recent_sync_runs(conn)],
                     }
@@ -197,6 +215,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"result": result_to_json(run_sync(self.config_from_payload(payload)))})
         elif path.startswith("/api/items/") and path.endswith("/review"):
             self.save_review_api(path, payload)
+        elif path.startswith("/api/items/") and path.endswith("/refind_media"):
+            self.refind_media_api(path)
         elif path.startswith("/api/items/") and path.endswith("/schedule"):
             self.save_schedule_api(path, payload)
         elif path.startswith("/api/items/") and path.endswith("/unschedule"):
@@ -236,6 +256,22 @@ class Handler(BaseHTTPRequestHandler):
             ):
                 self.send_json({"error": "item is locked for publishing"}, 409)
                 return
+            self.send_json({"item": row_to_item(db.get_item(conn, item_id))})
+        finally:
+            conn.close()
+
+    def refind_media_api(self, path: str) -> None:
+        item_id = int(path.split("/")[3])
+        conn = db.connect(self.config.db_path)
+        db.init_db(conn)
+        try:
+            item = db.get_item(conn, item_id)
+            if not item:
+                self.send_json({"item": None}, 404)
+                return
+            item_json = row_to_item(item)
+            urls = media_search.find_candidates(item_json, str(item_json.get("edited_copy") or item_json.get("generated_copy") or ""))
+            db.replace_search_media(conn, item_id, urls)
             self.send_json({"item": row_to_item(db.get_item(conn, item_id))})
         finally:
             conn.close()

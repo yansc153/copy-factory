@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from app import adapters, db, writer
+from app import adapters, db, media_search, writer
 from app.config import Config
 
 
@@ -149,6 +149,11 @@ def process_items(conn, config: Config, batch: str, result: SyncResult, items: l
         try:
             copy, status = writer.generate_copy(item, config)
             db.save_generation(conn, item_id, copy, status=status)
+            if not item.get("media_urls"):
+                try:
+                    db.replace_search_media(conn, item_id, media_search.find_candidates(item, copy))
+                except Exception:
+                    pass
             result.generated += 1
         except Exception as exc:
             db.save_generation(conn, item_id, "", str(exc))

@@ -15,8 +15,9 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlencode
 
-from app import db
 from app import adapters
+from app import db
+from app import media_search
 from app import writer
 from app.config import Config
 from app.sync import run_sync
@@ -36,6 +37,24 @@ class CopyFactoryFlowTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
+
+    def with_brave_env(self, enabled: bool) -> str | None:
+        old_key = os.environ.get("BRAVE_SEARCH_API_KEY")
+        if enabled:
+            os.environ["BRAVE_SEARCH_API_KEY"] = "test-key"
+        else:
+            os.environ.pop("BRAVE_SEARCH_API_KEY", None)
+        return old_key
+
+    def restore_brave_env(self, old_key: str | None) -> None:
+        if old_key is None:
+            os.environ.pop("BRAVE_SEARCH_API_KEY", None)
+        else:
+            os.environ["BRAVE_SEARCH_API_KEY"] = old_key
+
+    def png_bytes(self, width: int = 1280, height: int = 720, size: int = media_search.MIN_BYTES + 1) -> bytes:
+        data = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + width.to_bytes(4, "big") + height.to_bytes(4, "big")
+        return data + (b"x" * (size - len(data)))
 
     def test_mock_sync_dedupes_generates_and_review_save_updates_status(self) -> None:
         first = run_sync(self.config)
@@ -427,6 +446,200 @@ class CopyFactoryFlowTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("DEEPSEEK_API_KEY", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
+
+    def test_missing_brave_credentials_keep_no_image_draft_image_free(self) -> None:
+        old_key = self.with_brave_env(False)
+        try:
+            result = run_sync(self.config)
+            self.assertEqual(result.generated, 3)
+        finally:
+            self.restore_brave_env(old_key)
+
+        conn = db.connect(self.config.db_path)
+        try:
+            row = conn.execute("SELECT media_urls, selected_media_url FROM source_items WHERE source_id = ?", ("xq-2026-06-20-002",)).fetchone()
+            self.assertEqual(json.loads(row["media_urls"]), [])
+            self.assertEqual(row["selected_media_url"], "")
+        finally:
+            conn.close()
+
+    def test_brave_image_candidates_are_downloaded_and_saved_for_no_image_drafts(self) -> None:
+        old_key = self.with_brave_env(True)
+        old_urlopen = media_search.urlopen
+        old_media_dir = media_search.MEDIA_DIR
+
+        class FakeResponse(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def fake_urlopen(req, timeout=0):
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            if "api.search.brave.com/res/v1/images/search" in url:
+                payload = {
+                    "results": [
+                        {"properties": {"url": "https://img.example/too-small.png", "width": 600, "height": 400}},
+                        {"properties": {"url": "https://img.example/one.png", "width": 1280, "height": 720}},
+                        {"properties": {"url": "https://img.example/two.png", "width": 1200, "height": 800}},
+                        {"properties": {"url": "https://img.example/three.png", "width": 1920, "height": 1080}},
+                    ]
+                }
+                return FakeResponse(json.dumps(payload).encode())
+            if "too-small" in url:
+                return FakeResponse(self.png_bytes(600, 400))
+            return FakeResponse(self.png_bytes())
+
+        try:
+            media_search.urlopen = fake_urlopen
+            media_search.MEDIA_DIR = Path(self.tmp.name) / "media" / "google"
+            result = run_sync(self.config)
+        finally:
+            media_search.urlopen = old_urlopen
+            media_search.MEDIA_DIR = old_media_dir
+            self.restore_brave_env(old_key)
+
+        self.assertEqual(result.generated, 3)
+        conn = db.connect(self.config.db_path)
+        try:
+            row = conn.execute("SELECT media_urls, selected_media_url FROM source_items WHERE source_id = ?", ("xq-2026-06-20-002",)).fetchone()
+            media_urls = json.loads(row["media_urls"])
+            self.assertEqual(len(media_urls), 3)
+            self.assertTrue(all(url.startswith("/media/google/") for url in media_urls))
+            self.assertEqual(row["selected_media_url"], media_urls[0])
+            for url in media_urls:
+                self.assertTrue((Path(self.tmp.name) / "media" / "google" / Path(url).name).exists())
+        finally:
+            conn.close()
+
+    def test_review_api_saves_manual_selected_media_url(self) -> None:
+        run_sync(self.config)
+        Handler.config = self.config
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        host, port = server.server_address
+        try:
+            client = http.client.HTTPConnection(host, port)
+            body = urlencode({"user": "tester", "password": "secret"})
+            client.request("POST", "/login", body, {"Content-Type": "application/x-www-form-urlencoded"})
+            cookie = client.getresponse().getheader("Set-Cookie")
+            conn = db.connect(self.config.db_path)
+            item_id = conn.execute("SELECT id FROM source_items WHERE selected_media_url != '' LIMIT 1").fetchone()["id"]
+            conn.close()
+
+            selected = "/static/mock-manual-choice.svg"
+            payload = json.dumps({"edited_copy": "人工选择图片", "status": "approved", "selected_media_url": selected}).encode()
+            client.request("POST", f"/api/items/{item_id}/review", payload, {"Content-Type": "application/json", "Cookie": cookie})
+            response = client.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read().decode())["item"]["selected_media_url"], selected)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_existing_original_media_does_not_trigger_brave_search(self) -> None:
+        old_key = self.with_brave_env(True)
+        old_fetch_source = adapters.fetch_source
+        old_find = media_search.find_candidates
+        calls = {"brave": 0}
+
+        def fake_fetch_source(name):
+            return [
+                {
+                    "source": name,
+                    "source_id": "has-original",
+                    "url": "https://example.test/has-original",
+                    "title": "has original",
+                    "text": "has original",
+                    "author": "",
+                    "published_at": "2026-06-20T00:00:00Z",
+                    "media_urls": ["https://origin.example/original.jpg"],
+                }
+            ]
+
+        def fake_find(item, copy="", limit=3):
+            calls["brave"] += 1
+            return ["/media/google/should-not-exist.png"]
+
+        try:
+            adapters.fetch_source = fake_fetch_source
+            media_search.find_candidates = fake_find
+            result = run_sync(Config(db_path=f"{self.tmp.name}/original.sqlite3", sources=("only-original",)))
+        finally:
+            adapters.fetch_source = old_fetch_source
+            media_search.find_candidates = old_find
+            self.restore_brave_env(old_key)
+
+        self.assertEqual(result.inserted, 1)
+        self.assertEqual(calls["brave"], 0)
+
+    def test_duplicate_existing_no_image_item_does_not_trigger_brave_search(self) -> None:
+        old_find = media_search.find_candidates
+        calls = {"brave": 0}
+
+        def fake_find(item, copy="", limit=3):
+            calls["brave"] += 1
+            return []
+
+        try:
+            media_search.find_candidates = fake_find
+            first = run_sync(self.config)
+            second = run_sync(self.config)
+        finally:
+            media_search.find_candidates = old_find
+
+        self.assertEqual((first.inserted, second.duplicates), (3, 3))
+        self.assertEqual(calls["brave"], 1)
+
+    def test_refind_media_replaces_only_local_search_candidates(self) -> None:
+        conn = db.connect(self.config.db_path)
+        db.init_db(conn)
+        try:
+            item_id, _ = db.insert_source_item(
+                conn,
+                {
+                    "source": "manual",
+                    "source_id": "refind",
+                    "url": "https://example.test/refind",
+                    "title": "refind",
+                    "text": "refind text",
+                    "author": "",
+                    "published_at": "2026-06-20T00:00:00Z",
+                    "media_urls": ["https://origin.example/original.jpg", "/media/google/old.png"],
+                },
+                "batch",
+            )
+            db.save_generation(conn, item_id, "generated copy")
+        finally:
+            conn.close()
+
+        old_find = media_search.find_candidates
+        media_search.find_candidates = lambda item, copy="", limit=3: ["/media/google/new-a.png", "/media/google/new-b.png"]
+        Handler.config = self.config
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        host, port = server.server_address
+        try:
+            client = http.client.HTTPConnection(host, port)
+            body = urlencode({"user": "tester", "password": "secret"})
+            client.request("POST", "/login", body, {"Content-Type": "application/x-www-form-urlencoded"})
+            cookie = client.getresponse().getheader("Set-Cookie")
+            client.request("POST", f"/api/items/{item_id}/refind_media", b"{}", {"Content-Type": "application/json", "Cookie": cookie})
+            response = client.getresponse()
+            payload = json.loads(response.read().decode())
+            self.assertEqual(response.status, 200)
+            self.assertEqual(
+                payload["item"]["media_urls"],
+                ["https://origin.example/original.jpg", "/media/google/new-a.png", "/media/google/new-b.png"],
+            )
+            self.assertEqual(payload["item"]["selected_media_url"], "/media/google/new-a.png")
+        finally:
+            media_search.find_candidates = old_find
+            server.shutdown()
+            server.server_close()
 
     def test_items_are_split_by_work_date(self) -> None:
         run_sync(self.config)
